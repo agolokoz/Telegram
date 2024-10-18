@@ -10,7 +10,7 @@ import android.content.DialogInterface;
 import android.content.Intent;
 import android.graphics.Canvas;
 import android.graphics.Color;
-import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.*;
 import android.text.SpannableStringBuilder;
 import android.text.TextUtils;
 import android.util.TypedValue;
@@ -27,7 +27,7 @@ import android.widget.PopupWindow;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
-import androidx.annotation.NonNull;
+import androidx.annotation.*;
 import androidx.collection.LongSparseArray;
 import androidx.core.content.ContextCompat;
 import androidx.core.graphics.ColorUtils;
@@ -78,12 +78,18 @@ public class LinkActionView extends LinearLayout {
     private boolean canEdit = true;
     private final boolean isChannel;
     private final float[] point = new float[2];
+    private final boolean isOptionsQr;
 
     public LinkActionView(Context context, BaseFragment fragment, BottomSheet bottomSheet, long chatId, boolean permanent, boolean isChannel) {
+        this(context, fragment, bottomSheet, chatId, permanent, isChannel, false);
+    }
+
+    public LinkActionView(Context context, BaseFragment fragment, BottomSheet bottomSheet, long chatId, boolean permanent, boolean isChannel, boolean isOptionsQr) {
         super(context);
         this.fragment = fragment;
         this.permanent = permanent;
         this.isChannel = isChannel;
+        this.isOptionsQr = isOptionsQr;
 
         setOrientation(VERTICAL);
         frameLayout = new FrameLayout(context);
@@ -93,13 +99,15 @@ public class LinkActionView extends LinearLayout {
         linkView.setEllipsize(TextUtils.TruncateAt.MIDDLE);
         linkView.setSingleLine(true);
 
-        int containerPadding = 4;
         frameLayout.addView(linkView);
         optionsView = new ImageView(context);
-        optionsView.setImageDrawable(ContextCompat.getDrawable(context, R.drawable.ic_ab_other));
+        optionsView.setBackground(Theme.createSelectorDrawable(fragment.getThemedColor(Theme.key_listSelector)));
+        optionsView.setImageDrawable(ContextCompat.getDrawable(context, getOptionsDrawableRes()));
         optionsView.setContentDescription(LocaleController.getString(R.string.AccDescrMoreOptions));
         optionsView.setScaleType(ImageView.ScaleType.CENTER);
-        frameLayout.addView(optionsView, LayoutHelper.createFrame(40, 48, Gravity.RIGHT | Gravity.CENTER_VERTICAL));
+        frameLayout.addView(optionsView, LayoutHelper.createFrame(48, 48, Gravity.RIGHT | Gravity.CENTER_VERTICAL));
+
+        int containerPadding = 4;
         addView(frameLayout, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, containerPadding, 0, containerPadding, 0));
 
         LinearLayout linearLayout = new LinearLayout(context);
@@ -218,130 +226,134 @@ public class LinkActionView extends LinearLayout {
             fragment.showDialog(builder.create());
         });
 
-        optionsView.setOnClickListener(view -> {
-            if (actionBarPopupWindow != null) {
-                return;
-            }
-            ActionBarPopupWindow.ActionBarPopupWindowLayout layout = new ActionBarPopupWindow.ActionBarPopupWindowLayout(context);
+        if (isOptionsQr) {
+            optionsView.setOnClickListener(view -> showQrCode());
+        } else {
+            optionsView.setOnClickListener(view -> {
+                if (actionBarPopupWindow != null) {
+                    return;
+                }
+                ActionBarPopupWindow.ActionBarPopupWindowLayout layout = new ActionBarPopupWindow.ActionBarPopupWindowLayout(context);
 
-            ActionBarMenuSubItem subItem;
-            if (!this.permanent && canEdit) {
+                ActionBarMenuSubItem subItem;
+                if (!this.permanent && canEdit) {
+                    subItem = new ActionBarMenuSubItem(context, true, false);
+                    subItem.setTextAndIcon(LocaleController.getString(R.string.Edit), R.drawable.msg_edit);
+                    layout.addView(subItem, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 48));
+                    subItem.setOnClickListener(view12 -> {
+                        if (actionBarPopupWindow != null) {
+                            actionBarPopupWindow.dismiss();
+                        }
+                        delegate.editLink();
+                    });
+                }
+
                 subItem = new ActionBarMenuSubItem(context, true, false);
-                subItem.setTextAndIcon(LocaleController.getString(R.string.Edit), R.drawable.msg_edit);
+                subItem.setTextAndIcon(LocaleController.getString(R.string.GetQRCode), R.drawable.msg_qrcode);
                 layout.addView(subItem, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 48));
                 subItem.setOnClickListener(view12 -> {
-                    if (actionBarPopupWindow != null) {
-                        actionBarPopupWindow.dismiss();
-                    }
-                    delegate.editLink();
+                    showQrCode();
                 });
-            }
 
-            subItem = new ActionBarMenuSubItem(context, true, false);
-            subItem.setTextAndIcon(LocaleController.getString(R.string.GetQRCode), R.drawable.msg_qrcode);
-            layout.addView(subItem, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 48));
-            subItem.setOnClickListener(view12 -> {
-                showQrCode();
-            });
-
-            if (!hideRevokeOption) {
-                subItem = new ActionBarMenuSubItem(context, false, true);
-                subItem.setTextAndIcon(LocaleController.getString(R.string.RevokeLink), R.drawable.msg_delete);
-                subItem.setColors(Theme.getColor(Theme.key_text_RedRegular), Theme.getColor(Theme.key_text_RedRegular));
-                subItem.setOnClickListener(view1 -> {
-                    if (actionBarPopupWindow != null) {
-                        actionBarPopupWindow.dismiss();
-                    }
-                    revokeLink();
-                });
-                layout.addView(subItem, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 48));
-            }
-
-            FrameLayout container;
-            if (bottomSheet == null) {
-                container = (FrameLayout) fragment.getParentLayout().getOverlayContainerView();
-            } else {
-                container = bottomSheet.getContainer();
-            }
-
-
-            if (container != null) {
-                float x = 0;
-                float y;
-                getPointOnScreen(frameLayout, container, point);
-                y = point[1];
-
-                final FrameLayout finalContainer = container;
-                View dimView = new View(context) {
-
-                    @Override
-                    protected void onDraw(Canvas canvas) {
-                        canvas.drawColor(0x33000000);
-                        getPointOnScreen(frameLayout, finalContainer, point);
-                        canvas.save();
-                        float clipTop = ((View) frameLayout.getParent()).getY() + frameLayout.getY();
-                        if (clipTop < 1) {
-                            canvas.clipRect(0, point[1] - clipTop + 1, getMeasuredWidth(), getMeasuredHeight());
+                if (!hideRevokeOption) {
+                    subItem = new ActionBarMenuSubItem(context, false, true);
+                    subItem.setTextAndIcon(LocaleController.getString(R.string.RevokeLink), R.drawable.msg_delete);
+                    subItem.setColors(Theme.getColor(Theme.key_text_RedRegular), Theme.getColor(Theme.key_text_RedRegular));
+                    subItem.setOnClickListener(view1 -> {
+                        if (actionBarPopupWindow != null) {
+                            actionBarPopupWindow.dismiss();
                         }
-                        canvas.translate(point[0], point[1]);
-
-                        frameLayout.draw(canvas);
-                        canvas.restore();
-                    }
-                };
-
-                ViewTreeObserver.OnPreDrawListener preDrawListener = new ViewTreeObserver.OnPreDrawListener() {
-                    @Override
-                    public boolean onPreDraw() {
-                        dimView.invalidate();
-                        return true;
-                    }
-                };
-                finalContainer.getViewTreeObserver().addOnPreDrawListener(preDrawListener);
-                container.addView(dimView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
-                dimView.setAlpha(0);
-                dimView.animate().alpha(1f).setDuration(150);
-                layout.measure(MeasureSpec.makeMeasureSpec(container.getMeasuredWidth(), MeasureSpec.UNSPECIFIED), MeasureSpec.makeMeasureSpec(container.getMeasuredHeight(), MeasureSpec.UNSPECIFIED));
-
-
-                actionBarPopupWindow = new ActionBarPopupWindow(layout, LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT);
-                actionBarPopupWindow.setOnDismissListener(new PopupWindow.OnDismissListener() {
-                    @Override
-                    public void onDismiss() {
-                        actionBarPopupWindow = null;
-                        dimView.animate().cancel();
-                        dimView.animate().alpha(0).setDuration(150).setListener(new AnimatorListenerAdapter() {
-                            @Override
-                            public void onAnimationEnd(Animator animation) {
-                                if (dimView.getParent() != null) {
-                                    finalContainer.removeView(dimView);
-                                }
-                                finalContainer.getViewTreeObserver().removeOnPreDrawListener(preDrawListener);
-                            }
-                        });
-                    }
-                });
-                actionBarPopupWindow.setOutsideTouchable(true);
-                actionBarPopupWindow.setFocusable(true);
-                actionBarPopupWindow.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
-                actionBarPopupWindow.setAnimationStyle(R.style.PopupContextAnimation);
-                actionBarPopupWindow.setInputMethodMode(ActionBarPopupWindow.INPUT_METHOD_NOT_NEEDED);
-                actionBarPopupWindow.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_UNSPECIFIED);
-
-                layout.setDispatchKeyEventListener(keyEvent -> {
-                    if (keyEvent.getKeyCode() == KeyEvent.KEYCODE_BACK && keyEvent.getRepeatCount() == 0 && actionBarPopupWindow.isShowing()) {
-                        actionBarPopupWindow.dismiss(true);
-                    }
-                });
-
-                if (AndroidUtilities.isTablet()) {
-                    y += container.getPaddingTop();
-                    x -= container.getPaddingLeft();
+                        revokeLink();
+                    });
+                    layout.addView(subItem, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 48));
                 }
-                actionBarPopupWindow.showAtLocation(container, 0, (int) (container.getMeasuredWidth() - layout.getMeasuredWidth() - AndroidUtilities.dp(16) + container.getX() + x), (int) (y + frameLayout.getMeasuredHeight() + container.getY()));
-            }
 
-        });
+                FrameLayout container;
+                if (bottomSheet == null) {
+                    container = (FrameLayout) fragment.getParentLayout().getOverlayContainerView();
+                } else {
+                    container = bottomSheet.getContainer();
+                }
+
+
+                if (container != null) {
+                    float x = 0;
+                    float y;
+                    getPointOnScreen(frameLayout, container, point);
+                    y = point[1];
+
+                    final FrameLayout finalContainer = container;
+                    View dimView = new View(context) {
+
+                        @Override
+                        protected void onDraw(Canvas canvas) {
+                            canvas.drawColor(0x33000000);
+                            getPointOnScreen(frameLayout, finalContainer, point);
+                            canvas.save();
+                            float clipTop = ((View) frameLayout.getParent()).getY() + frameLayout.getY();
+                            if (clipTop < 1) {
+                                canvas.clipRect(0, point[1] - clipTop + 1, getMeasuredWidth(), getMeasuredHeight());
+                            }
+                            canvas.translate(point[0], point[1]);
+
+                            frameLayout.draw(canvas);
+                            canvas.restore();
+                        }
+                    };
+
+                    ViewTreeObserver.OnPreDrawListener preDrawListener = new ViewTreeObserver.OnPreDrawListener() {
+                        @Override
+                        public boolean onPreDraw() {
+                            dimView.invalidate();
+                            return true;
+                        }
+                    };
+                    finalContainer.getViewTreeObserver().addOnPreDrawListener(preDrawListener);
+                    container.addView(dimView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+                    dimView.setAlpha(0);
+                    dimView.animate().alpha(1f).setDuration(150);
+                    layout.measure(MeasureSpec.makeMeasureSpec(container.getMeasuredWidth(), MeasureSpec.UNSPECIFIED), MeasureSpec.makeMeasureSpec(container.getMeasuredHeight(), MeasureSpec.UNSPECIFIED));
+
+
+                    actionBarPopupWindow = new ActionBarPopupWindow(layout, LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT);
+                    actionBarPopupWindow.setOnDismissListener(new PopupWindow.OnDismissListener() {
+                        @Override
+                        public void onDismiss() {
+                            actionBarPopupWindow = null;
+                            dimView.animate().cancel();
+                            dimView.animate().alpha(0).setDuration(150).setListener(new AnimatorListenerAdapter() {
+                                @Override
+                                public void onAnimationEnd(Animator animation) {
+                                    if (dimView.getParent() != null) {
+                                        finalContainer.removeView(dimView);
+                                    }
+                                    finalContainer.getViewTreeObserver().removeOnPreDrawListener(preDrawListener);
+                                }
+                            });
+                        }
+                    });
+                    actionBarPopupWindow.setOutsideTouchable(true);
+                    actionBarPopupWindow.setFocusable(true);
+                    actionBarPopupWindow.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+                    actionBarPopupWindow.setAnimationStyle(R.style.PopupContextAnimation);
+                    actionBarPopupWindow.setInputMethodMode(ActionBarPopupWindow.INPUT_METHOD_NOT_NEEDED);
+                    actionBarPopupWindow.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_UNSPECIFIED);
+
+                    layout.setDispatchKeyEventListener(keyEvent -> {
+                        if (keyEvent.getKeyCode() == KeyEvent.KEYCODE_BACK && keyEvent.getRepeatCount() == 0 && actionBarPopupWindow.isShowing()) {
+                            actionBarPopupWindow.dismiss(true);
+                        }
+                    });
+
+                    if (AndroidUtilities.isTablet()) {
+                        y += container.getPaddingTop();
+                        x -= container.getPaddingLeft();
+                    }
+                    actionBarPopupWindow.showAtLocation(container, 0, (int) (container.getMeasuredWidth() - layout.getMeasuredWidth() - AndroidUtilities.dp(16) + container.getX() + x), (int) (y + frameLayout.getMeasuredHeight() + container.getY()));
+                }
+
+            });
+        }
 
         frameLayout.setOnClickListener(new OnClickListener() {
             @Override
@@ -456,7 +468,7 @@ public class LinkActionView extends LinearLayout {
         if (hideRevokeOption != b) {
             hideRevokeOption = b;
             optionsView.setVisibility(View.VISIBLE);
-            optionsView.setImageDrawable(ContextCompat.getDrawable(optionsView.getContext(), R.drawable.ic_ab_other));
+            optionsView.setImageDrawable(ContextCompat.getDrawable(optionsView.getContext(), getOptionsDrawableRes()));
         }
     }
 
@@ -616,5 +628,10 @@ public class LinkActionView extends LinearLayout {
 
     public void setCanEdit(boolean canEdit) {
         this.canEdit = canEdit;
+    }
+
+    @DrawableRes
+    private int getOptionsDrawableRes() {
+        return isOptionsQr ? R.drawable.msg_qr_mini : R.drawable.ic_ab_other;
     }
 }
