@@ -18,4 +18,5 @@ TMessagesProj_AppHuawei/afat/
 gradlew.bat
 gradle/wrapper/gradle-wrapper.jar
 gradle/wrapper/gradle-wrapper.properties
+TMessagesProj/google-services.json
 TMessagesProj/src/main/java/org/telegram/messenger/BuildVars.java
