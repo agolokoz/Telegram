@@ -35,6 +35,7 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapShader;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.ColorFilter;
 import android.graphics.ColorMatrix;
 import android.graphics.ColorMatrixColorFilter;
 import android.graphics.LinearGradient;
@@ -42,6 +43,7 @@ import android.graphics.Matrix;
 import android.graphics.Outline;
 import android.graphics.Paint;
 import android.graphics.Path;
+import android.graphics.PixelFormat;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffColorFilter;
 import android.graphics.PorterDuffXfermode;
@@ -356,6 +358,7 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
     private boolean bottomOverlayChatWaitsReply;
     private BlurredFrameLayout bottomOverlayChat;
     private BlurredFrameLayout bottomMessagesActionContainer;
+    private HintView2 bottomOverlayHint;
     @Nullable
     private TextView forwardButton;
     @Nullable
@@ -7917,7 +7920,7 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
         bottomOverlayChat.drawBlur = false;
         bottomOverlayChat.setWillNotDraw(false);
         bottomOverlayChat.setPadding(0, AndroidUtilities.dp(1.5f), 0, 0);
-        bottomOverlayChat.setVisibility(View.INVISIBLE);
+        setBottomOverlayChatVisibility(View.INVISIBLE);
         bottomOverlayChat.setClipChildren(false);
         contentView.addView(bottomOverlayChat, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 51, Gravity.BOTTOM));
 
@@ -7941,9 +7944,8 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
             @Override
             public void setVisibility(int visibility) {
                 super.setVisibility(visibility);
-
-                ViewGroup.LayoutParams params = bottomOverlayChat.getLayoutParams();
-                params.height = AndroidUtilities.dp(visibility == VISIBLE ? 51 + 8 * 2 : 51);
+                bottomOverlayChat.getLayoutParams().height = AndroidUtilities.dp(visibility == VISIBLE ? 51 + 8 * 2 : 51);
+                setBottomOverlayStartButtonHintVisible(bottomOverlayChat.getVisibility() == View.VISIBLE && visibility == View.VISIBLE);
             }
         };
         bottomOverlayStartButton.setBackground(Theme.AdaptiveRipple.filledRect(getThemedColor(Theme.key_featuredStickers_addButton), 8));
@@ -7958,7 +7960,7 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
 
         if (currentUser != null && currentUser.bot && currentUser.id != UserObject.VERIFY && !UserObject.isDeleted(currentUser) && !UserObject.isReplyUser(currentUser) && !isInScheduleMode() && chatMode != MODE_PINNED && chatMode != MODE_SAVED && !isReport()) {
             bottomOverlayStartButton.setVisibility(View.VISIBLE);
-            bottomOverlayChat.setVisibility(View.VISIBLE);
+            setBottomOverlayChatVisibility(View.VISIBLE);
         }
 
         bottomOverlayLinksText = new LinkSpanDrawable.LinksTextView(context, themeDelegate);
@@ -19968,7 +19970,7 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
                     sentBotStart = true;
                     getMessagesController().sendBotStart(currentUser, botUser);
 
-                    bottomOverlayChat.setVisibility(View.GONE);
+                    setBottomOverlayChatVisibility(View.GONE);
                     if (!isInsideContainer) {
                         chatActivityEnterView.setVisibility(View.VISIBLE);
                     }
@@ -25230,11 +25232,11 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
             if (searchContainer != null) {
                 searchContainer.setVisibility(View.INVISIBLE);
             }
-            bottomOverlayChat.setVisibility(View.INVISIBLE);
+            setBottomOverlayChatVisibility(View.INVISIBLE);
             chatActivityEnterView.setFieldFocused(false);
             chatActivityEnterView.setVisibility(View.INVISIBLE);
         } else if (bottomOverlayLinks) {
-            bottomOverlayChat.setVisibility(View.VISIBLE);
+            setBottomOverlayChatVisibility(View.VISIBLE);
             chatActivityEnterView.setVisibility(View.INVISIBLE);
         } else if (searchItem != null && searchItemVisible) {
             createSearchContainer();
@@ -25273,7 +25275,7 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
                     public void onAnimationEnd(Animator animation) {
                         searchExpandProgress = 1f;
                         chatActivityEnterView.setVisibility(View.INVISIBLE);
-                        bottomOverlayChat.setVisibility(View.INVISIBLE);
+                        setBottomOverlayChatVisibility(View.INVISIBLE);
                         invalidateChatListViewTopPadding();
                     }
                 });
@@ -25282,7 +25284,7 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
                 searchExpandAnimator.start();
             } else {
                 chatActivityEnterView.setVisibility(View.INVISIBLE);
-                bottomOverlayChat.setVisibility(View.INVISIBLE);
+                setBottomOverlayChatVisibility(View.INVISIBLE);
                 invalidateChatListViewTopPadding();
             }
 
@@ -25359,10 +25361,10 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
                 }
             }
             if (isInsideContainer || forceNoBottom) {
-                bottomOverlayChat.setVisibility(View.GONE);
+                setBottomOverlayChatVisibility(View.GONE);
                 chatActivityEnterView.setVisibility(View.GONE);
             } else if (isReport()) {
-                bottomOverlayChat.setVisibility(View.VISIBLE);
+                setBottomOverlayChatVisibility(View.VISIBLE);
                 chatActivityEnterView.setVisibility(View.INVISIBLE);
             } else if (chatMode == MODE_PINNED ||
                     currentChat != null && ((ChatObject.isNotInChat(currentChat) || !ChatObject.canWriteToChat(currentChat)) && (currentChat.join_to_send || !isThreadChat() || ChatObject.isForum(currentChat)) || forumTopic != null && forumTopic.closed && !ChatObject.canManageTopic(currentAccount, currentChat, forumTopic) || shouldDisplaySwipeToLeftToReplyInForum()) ||
@@ -25370,11 +25372,11 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
                 if (chatActivityEnterView.isEditingMessage()) {
                     chatActivityEnterView.setVisibility(View.VISIBLE);
                     AndroidUtilities.updateViewShow(bottomOverlayChat, false, false, true);
-                    bottomOverlayChat.setVisibility(View.INVISIBLE);
+                    setBottomOverlayChatVisibility(View.INVISIBLE);
                     chatActivityEnterView.setFieldFocused();
                     AndroidUtilities.runOnUIThread(() -> chatActivityEnterView.openKeyboard(), 100);
                 } else {
-                    bottomOverlayChat.setVisibility(View.VISIBLE);
+                    setBottomOverlayChatVisibility(View.VISIBLE);
                     AndroidUtilities.updateViewShow(bottomOverlayChat, true, false, true);
                     chatActivityEnterView.setFieldFocused(false);
                     chatActivityEnterView.setVisibility(View.INVISIBLE);
@@ -25394,10 +25396,10 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
                 }
             } else {
                 if (botUser != null && currentUser.bot || currentUser != null && currentUser.id == UserObject.VERIFY || chatMode == MODE_SAVED && getSavedDialogId() != getUserConfig().getClientUserId()) {
-                    bottomOverlayChat.setVisibility(View.VISIBLE);
+                    setBottomOverlayChatVisibility(View.VISIBLE);
                     chatActivityEnterView.setVisibility(View.INVISIBLE);
                 } else {
-                    bottomOverlayChat.setVisibility(View.INVISIBLE);
+                    setBottomOverlayChatVisibility(View.INVISIBLE);
                     chatActivityEnterView.setVisibility(View.VISIBLE);
                 }
             }
@@ -25407,7 +25409,7 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
             }
         }
         if (sentBotStart) {
-            bottomOverlayChat.setVisibility(View.GONE);
+            setBottomOverlayChatVisibility(View.GONE);
             chatActivityEnterView.setVisibility(View.VISIBLE);
             chatActivityEnterView.setBotInfo(botInfo);
         }
@@ -40106,5 +40108,97 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
     @Override
     public boolean allowFinishFragmentInsteadOfRemoveFromStack() {
         return !inPreviewMode;
+    }
+
+    private void setBottomOverlayChatVisibility(int visibility) {
+        if (bottomOverlayChat == null) {
+            return;
+        }
+        bottomOverlayChat.setVisibility(visibility);
+        if (bottomOverlayStartButton != null) {
+            setBottomOverlayStartButtonHintVisible(visibility == View.VISIBLE && bottomOverlayStartButton.getVisibility() == View.VISIBLE);
+        }
+    }
+    
+    private void setBottomOverlayStartButtonHintVisible(boolean visible) {
+        if (visible) {
+            if (bottomOverlayHint == null) {
+                final Drawable arrowsDrawable = new Drawable() {
+
+                    private final Drawable pageDownDrawable = ContextCompat.getDrawable(getContext(), R.drawable.pagedown);
+                    private final int width = AndroidUtilities.dp(10.3f);
+                    private final int height = Math.round((float) width / pageDownDrawable.getIntrinsicWidth() * pageDownDrawable.getIntrinsicHeight());
+                    private final int innerSpace = AndroidUtilities.dp(1);
+                    private final int leftSpace = AndroidUtilities.dp(12);
+                    private final int rightSpace = AndroidUtilities.dp(8.3f);
+
+                    @Override
+                    public void draw(@NonNull Canvas canvas) {
+                        pageDownDrawable.setBounds(leftSpace, 0, leftSpace + width, height);
+                        pageDownDrawable.draw(canvas);
+                        pageDownDrawable.setBounds(pageDownDrawable.getBounds().left, height - innerSpace, pageDownDrawable.getBounds().right, height * 2 - innerSpace);
+                        pageDownDrawable.draw(canvas);
+                    }
+
+                    @Override
+                    public void setAlpha(int alpha) {
+                        pageDownDrawable.setAlpha(alpha);
+                    }
+
+                    @Override
+                    public void setColorFilter(@Nullable ColorFilter colorFilter) {
+                        pageDownDrawable.setColorFilter(colorFilter);
+                    }
+
+                    @Override
+                    public int getOpacity() {
+                        return PixelFormat.TRANSPARENT;
+                    }
+
+                    @Override
+                    public int getIntrinsicWidth() {
+                        return leftSpace + width + rightSpace;
+                    }
+
+                    @Override
+                    public int getIntrinsicHeight() {
+                        return height * 2 - innerSpace;
+                    }
+                };
+                arrowsDrawable.setBounds(0, 0, arrowsDrawable.getIntrinsicWidth(), arrowsDrawable.getIntrinsicHeight());
+                SpannableString arrowsString = new SpannableString("a");
+                arrowsString.setSpan(new ImageSpan(arrowsDrawable) {
+                    @Override
+                    public void draw(@NonNull Canvas canvas, CharSequence text, int start, int end, float x, int top, int y, int bottom, @NonNull Paint paint) {
+                        canvas.save();
+                        canvas.translate(0, y + paint.ascent() + paint.descent() - AndroidUtilities.dp(1));
+                        arrowsDrawable.setAlpha(paint.getAlpha());
+                        arrowsDrawable.draw(canvas);
+                        canvas.restore();
+                    }
+                }, 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                CharSequence text = AndroidUtilities.replaceCharSequence("%s", LocaleController.getString(R.string.TapHereBot), arrowsString);
+                bottomOverlayHint = new HintView2(getContext(), HintView2.DIRECTION_BOTTOM)
+                        .setBgColor(0xC41E2937)
+                        .setDuration(-1)
+                        .setInnerPadding(0, 7, 14, 8)
+                        .setMaxWidthPx((int) (AndroidUtilities.displaySize.x * 0.75f))
+                        .setRounding(8)
+                        .setText(text)
+                        .setOnHiddenListener(() -> {
+                            contentView.removeView(bottomOverlayHint);
+                            bottomOverlayHint = null;
+                        });
+                int index = contentView.indexOfChild(bottomOverlayChat) + 1;
+                FrameLayout.LayoutParams layoutParams = LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.BOTTOM);
+                layoutParams.bottomMargin = bottomOverlayChat.getLayoutParams().height + AndroidUtilities.dp(6);
+                contentView.addView(bottomOverlayHint, index, layoutParams);
+            }
+            if (!bottomOverlayHint.shown()) {
+                bottomOverlayHint.show();
+            }
+        } else if (bottomOverlayHint != null && bottomOverlayHint.shown()) {
+            bottomOverlayHint.hide(true);
+        }
     }
 }
