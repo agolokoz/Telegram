@@ -131,6 +131,7 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
     private ImageView silentButtonImage;
     private FragmentContextView additionalContextView;
     private TextView joinButton;
+    private TextView timerButton;
     private int joinButtonWidth;
     private CellFlickerDrawable joinButtonFlicker;
 
@@ -169,14 +170,22 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
                 scheduleRunnableScheduled = false;
                 return;
             }
-            int currentTime = fragment.getConnectionsManager().getCurrentTime();
-            int diff = call.call.schedule_date - currentTime;
+
             String str;
-            if (diff >= 24 * 60 * 60) {
-                str = LocaleController.formatPluralString("Days", Math.round(diff / (24 * 60 * 60.0f)));
+            if (call.call.schedule_start_subscribed) {
+                int currentTime = fragment.getConnectionsManager().getCurrentTime();
+                int diff = call.call.schedule_date - currentTime;
+                if (diff >= 24 * 60 * 60) {
+                    str = LocaleController.formatPluralString("Days", Math.round(diff / (24 * 60 * 60.0f)));
+                } else {
+                    str = AndroidUtilities.formatFullDuration(call.call.schedule_date - currentTime);
+                }
             } else {
-                str = AndroidUtilities.formatFullDuration(call.call.schedule_date - currentTime);
+                str = LocaleController.getString(R.string.NotifyMe);
             }
+
+            timerButton.setText(str);
+
             int width = (int) Math.ceil(gradientTextPaint.measureText(str));
             timeLayout = new StaticLayout(str, gradientTextPaint, width, Layout.Alignment.ALIGN_NORMAL, 1.0f, 0.0f, false);
             AndroidUtilities.runOnUIThread(updateScheduleTimeRunnable, 1000);
@@ -469,6 +478,14 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
         if (flickOnAttach) {
             startJoinFlickerAnimation();
         }
+
+        timerButton = new TextView(context);
+        timerButton.setGravity(Gravity.CENTER);
+        timerButton.setPadding(AndroidUtilities.dp(13), 0, AndroidUtilities.dp(13), 0);
+        timerButton.setTextColor(getThemedColor(Theme.key_featuredStickers_buttonText));
+        timerButton.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
+        timerButton.setTypeface(AndroidUtilities.bold());
+        addView(timerButton, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, 28, Gravity.TOP | Gravity.RIGHT, 0, 10, 10, 0));
 
         silentButton = new FrameLayout(context);
         silentButtonImage = new ImageView(context);

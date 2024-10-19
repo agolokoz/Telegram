@@ -7554,6 +7554,7 @@
     <string name="NotificationReactions">Reactions</string>
     <string name="NotificationReactionsMessages">Messages</string>
     <string name="NotificationReactionsStories">Stories</string>
+    <string name="NotifyMe">Notify Me</string>
     <string name="NotifyMeAbout">Notify me about…</string>
     <string name="NotifyMeAboutPrivate">New Messages in Private Chats</string>
     <string name="NotifyMeAboutNewStories">New Stories</string>
