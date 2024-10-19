@@ -7554,6 +7554,7 @@
     <string name="NotificationReactions">Reactions</string>
     <string name="NotificationReactionsMessages">Messages</string>
     <string name="NotificationReactionsStories">Stories</string>
+    <string name="NotifyMe">Notify Me</string>
     <string name="NotifyMeAbout">Notify me about…</string>
     <string name="NotifyMeAboutPrivate">New Messages in Private Chats</string>
     <string name="NotifyMeAboutNewStories">New Stories</string>
@@ -8180,4 +8181,5 @@
     <string name="Gift2ButtonSell_one">sell for %d Star</string>
     <string name="Gift2ButtonSell_other">sell for %d Stars</string>
     <string name="TapHereBot">%sTap here to use this bot</string>
+    <string name="YouWillBeNotifiedStream">You will be notified when the live stream starts.</string>
 </resources>
