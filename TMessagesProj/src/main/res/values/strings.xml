@@ -8181,4 +8181,5 @@
     <string name="Gift2ButtonSell_one">sell for %d Star</string>
     <string name="Gift2ButtonSell_other">sell for %d Stars</string>
     <string name="TapHereBot">%sTap here to use this bot</string>
+    <string name="YouWillBeNotifiedStream">You will be notified when the live stream starts.</string>
 </resources>
