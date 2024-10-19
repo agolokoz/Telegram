@@ -16,24 +16,14 @@ import android.app.Dialog;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
-import android.graphics.Canvas;
-import android.graphics.Color;
-import android.graphics.LinearGradient;
-import android.graphics.Matrix;
-import android.graphics.Paint;
-import android.graphics.PorterDuff;
-import android.graphics.PorterDuffColorFilter;
-import android.graphics.RectF;
-import android.graphics.Shader;
-import android.graphics.Typeface;
+import android.graphics.*;
+import android.graphics.Rect;
+import android.graphics.drawable.*;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.SystemClock;
-import android.text.Layout;
 import android.text.SpannableStringBuilder;
 import android.text.Spanned;
-import android.text.StaticLayout;
-import android.text.TextPaint;
 import android.text.TextUtils;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -47,8 +37,7 @@ import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.TextView;
 
-import androidx.annotation.IntDef;
-import androidx.annotation.Keep;
+import androidx.annotation.*;
 
 import org.telegram.messenger.AccountInstance;
 import org.telegram.messenger.AndroidUtilities;
@@ -149,24 +138,18 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
     private boolean supportsCalls = true;
     private AvatarsImageView avatars;
 
-    private Paint gradientPaint;
-    private LinearGradient linearGradient;
-    private Matrix matrix;
-    private int gradientWidth;
-    private TextPaint gradientTextPaint;
-    private StaticLayout timeLayout;
-    private RectF rect = new RectF();
     private boolean scheduleRunnableScheduled;
     private final Runnable updateScheduleTimeRunnable = new Runnable() {
         @Override
         public void run() {
-            if (gradientTextPaint == null || !(fragment instanceof ChatActivity)) {
+            if (!(fragment instanceof ChatActivity)) {
                 scheduleRunnableScheduled = false;
                 return;
             }
+
             ChatObject.Call call = chatActivity.getGroupCall();
             if (call == null || !call.isScheduled()) {
-                timeLayout = null;
+                timerButton.setVisibility(GONE);
                 scheduleRunnableScheduled = false;
                 return;
             }
@@ -185,9 +168,6 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
             }
 
             timerButton.setText(str);
-
-            int width = (int) Math.ceil(gradientTextPaint.measureText(str));
-            timeLayout = new StaticLayout(str, gradientTextPaint, width, Layout.Alignment.ALIGN_NORMAL, 1.0f, 0.0f, false);
             AndroidUtilities.runOnUIThread(updateScheduleTimeRunnable, 1000);
             frameLayout.invalidate();
         }
@@ -304,13 +284,7 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
             @Override
             protected void dispatchDraw(Canvas canvas) {
                 super.dispatchDraw(canvas);
-                if (currentStyle == STYLE_INACTIVE_GROUP_CALL && timeLayout != null) {
-                    int width = (int) Math.ceil(timeLayout.getLineWidth(0)) + AndroidUtilities.dp(24);
-                    if (width != gradientWidth) {
-                        linearGradient = new LinearGradient(0, 0, width * 1.7f, 0, new int[]{0xff648CF4, 0xff8C69CF, 0xffD45979, 0xffD45979}, new float[]{0.0f, 0.294f, 0.588f, 1.0f}, Shader.TileMode.CLAMP);
-                        gradientPaint.setShader(linearGradient);
-                        gradientWidth = width;
-                    }
+                if (currentStyle == STYLE_INACTIVE_GROUP_CALL) {
                     ChatObject.Call call = chatActivity.getGroupCall();
                     float moveProgress = 0.0f;
                     if (fragment != null && call != null && call.isScheduled()) {
@@ -323,19 +297,10 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
                         if (diff < 6000) {
                             invalidate();
                         }
+                        if (timerButton.getVisibility() == View.VISIBLE) {
+                            ((TimerBackgroundDrawable) timerButton.getBackground()).setMoveProgress(moveProgress);
+                        }
                     }
-                    matrix.reset();
-                    matrix.postTranslate(-gradientWidth * 0.7f * moveProgress, 0);
-                    linearGradient.setLocalMatrix(matrix);
-                    int x = getMeasuredWidth() - width - AndroidUtilities.dp(10);
-                    int y = AndroidUtilities.dp(10);
-                    rect.set(0, 0, width, AndroidUtilities.dp(28));
-                    canvas.save();
-                    canvas.translate(x, y);
-                    canvas.drawRoundRect(rect, AndroidUtilities.dp(16), AndroidUtilities.dp(16), gradientPaint);
-                    canvas.translate(AndroidUtilities.dp(12), AndroidUtilities.dp(6));
-                    timeLayout.draw(canvas);
-                    canvas.restore();
                 }
             }
         };
@@ -480,11 +445,13 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
         }
 
         timerButton = new TextView(context);
+        timerButton.setBackground(new TimerBackgroundDrawable());
         timerButton.setGravity(Gravity.CENTER);
         timerButton.setPadding(AndroidUtilities.dp(13), 0, AndroidUtilities.dp(13), 0);
         timerButton.setTextColor(getThemedColor(Theme.key_featuredStickers_buttonText));
         timerButton.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
         timerButton.setTypeface(AndroidUtilities.bold());
+        timerButton.setVisibility(GONE);
         addView(timerButton, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, 28, Gravity.TOP | Gravity.RIGHT, 0, 10, 10, 0));
 
         silentButton = new FrameLayout(context);
@@ -1061,7 +1028,7 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
         currentStyle = style;
         frameLayout.setWillNotDraw(currentStyle != STYLE_INACTIVE_GROUP_CALL);
         if (style != STYLE_INACTIVE_GROUP_CALL) {
-            timeLayout = null;
+            timerButton.setVisibility(GONE);
         }
 
         if (avatars != null) {
@@ -2109,17 +2076,7 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
                 ChatObject.Call call = chatActivity.getGroupCall();
                 TLRPC.Chat chat = chatActivity.getCurrentChat();
                 if (call.isScheduled()) {
-                    if (gradientPaint == null) {
-                        gradientTextPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
-                        gradientTextPaint.setColor(0xffffffff);
-                        gradientTextPaint.setTextSize(AndroidUtilities.dp(14));
-                        gradientTextPaint.setTypeface(AndroidUtilities.bold());
-
-                        gradientPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-                        gradientPaint.setColor(0xffffffff);
-
-                        matrix = new Matrix();
-                    }
+                    timerButton.setVisibility(VISIBLE);
                     joinButton.setVisibility(GONE);
                     if (!TextUtils.isEmpty(call.call.title)) {
                         titleTextView.setText(call.call.title, false);
@@ -2136,7 +2093,7 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
                         updateScheduleTimeRunnable.run();
                     }
                 } else {
-                    timeLayout = null;
+                    timerButton.setVisibility(GONE);
                     joinButton.setVisibility(VISIBLE);
                     if (!TextUtils.isEmpty(call.call.title)) {
                         titleTextView.setText(call.call.title, false);
@@ -2454,5 +2411,57 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
 
     private int getThemedColor(int key) {
         return Theme.getColor(key, resourcesProvider);
+    }
+
+    private static class TimerBackgroundDrawable extends Drawable {
+
+        private static final float MoveWidthFactor = 0.7f;
+
+        private final Matrix matrix = new Matrix();
+        private final Paint gradientPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final RectF rect = new RectF();
+
+        private LinearGradient linearGradient;
+        private int width;
+        private float moveProgress;
+
+        @Override
+        protected void onBoundsChange(@NonNull Rect bounds) {
+            super.onBoundsChange(bounds);
+            if (width != bounds.width()) {
+                linearGradient = new LinearGradient(0, 0, bounds.width() * (1f + MoveWidthFactor), 0, new int[]{0xff648CF4, 0xff8C69CF, 0xffD45979, 0xffD45979}, new float[]{0.0f, 0.294f, 0.588f, 1.0f}, Shader.TileMode.CLAMP);
+                gradientPaint.setShader(linearGradient);
+                width = bounds.width();
+            }
+            rect.set(bounds);
+        }
+
+        @Override
+        public void draw(@NonNull Canvas canvas) {
+            matrix.reset();
+            matrix.postTranslate(-width * MoveWidthFactor * moveProgress, 0);
+            linearGradient.setLocalMatrix(matrix);
+            canvas.drawRoundRect(rect, AndroidUtilities.dp(16), AndroidUtilities.dp(16), gradientPaint);
+        }
+
+        @Override
+        public void setAlpha(int alpha) {
+            gradientPaint.setAlpha(alpha);
+        }
+
+        @Override
+        public void setColorFilter(@Nullable ColorFilter colorFilter) {
+            gradientPaint.setColorFilter(colorFilter);
+        }
+
+        @Override
+        public int getOpacity() {
+            return PixelFormat.TRANSPARENT;
+        }
+
+        public void setMoveProgress(float moveProgress) {
+            this.moveProgress = moveProgress;
+            invalidateSelf();
+        }
     }
 }
