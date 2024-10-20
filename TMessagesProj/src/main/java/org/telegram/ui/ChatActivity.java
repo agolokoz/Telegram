@@ -78,7 +78,6 @@ import android.text.style.ClickableSpan;
 import android.text.style.ForegroundColorSpan;
 import android.text.style.ImageSpan;
 import android.text.style.URLSpan;
-import android.util.Log;
 import android.util.Pair;
 import android.util.Property;
 import android.util.SparseArray;
@@ -267,7 +266,6 @@ import java.io.FileOutputStream;
 import java.io.FileWriter;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.net.IDN;
 import java.net.URLDecoder;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -35351,7 +35349,16 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
 
         @Override
         public boolean didLongPressSideButton(ChatMessageCell cell) {
-            Toast.makeText(cell.getContext(), "didLongPressSideButton", Toast.LENGTH_SHORT).show();
+            ChatQuickReply.Delegate delegate = new ChatQuickReply.Delegate() {
+                @Override
+                public void onDismiss(@NonNull ActionBarPopupWindow window) {
+                    ChatQuickReply.Delegate.super.onDismiss(window);
+                    if (scrimPopupWindow == window) {
+                        scrimPopupWindow = null;
+                    }
+                }
+            };
+            scrimPopupWindow = ChatQuickReply.show(ChatActivity.this, cell, delegate);
             return true;
         }
 

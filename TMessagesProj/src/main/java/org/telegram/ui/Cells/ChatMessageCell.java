@@ -217,6 +217,8 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
     private final static int UPLOADING_ALLOWABLE_ERROR = 1024 * 1024;
     private final static int STICKER_STATUS_OFFSET = 6;
 
+    public static final int SIDE_BUTTON_SIZE = AndroidUtilities.dp(32);
+
     public boolean clipToGroupBounds;
     public boolean drawForBlur;
     private boolean flipImage;
@@ -1385,8 +1387,8 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
     private float[] sideButtonPathCorners1, sideButtonPathCorners2;
     private static final int SIDE_BUTTON_SPONSORED_CLOSE = 4;
     private static final int SIDE_BUTTON_SPONSORED_MORE = 5;
-    private float sideStartX;
-    private float sideStartY;
+    public float sideStartX;
+    public float sideStartY;
 
     private StaticLayout nameLayout;
     private int nameLayoutWidth;
@@ -17902,13 +17904,13 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
         if (drawSideButton != 3) {
             return;
         }
-        int height = AndroidUtilities.dp(32);
+        int height = SIDE_BUTTON_SIZE;
         if (commentLayout != null) {
             sideStartY -= AndroidUtilities.dp(18);
             height += AndroidUtilities.dp(18);
         }
 
-        rect.set(sideStartX, sideStartY, sideStartX + AndroidUtilities.dp(32), sideStartY + height);
+        rect.set(sideStartX, sideStartY, sideStartX + SIDE_BUTTON_SIZE, sideStartY + height);
         applyServiceShaderMatrix();
         if (alpha != 1f) {
             int oldAlpha = getThemedPaint(Theme.key_paint_chatActionBackground).getAlpha();
