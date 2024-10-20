@@ -35350,6 +35350,12 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
         }
 
         @Override
+        public boolean didLongPressSideButton(ChatMessageCell cell) {
+            Toast.makeText(cell.getContext(), "didLongPressSideButton", Toast.LENGTH_SHORT).show();
+            return true;
+        }
+
+        @Override
         public boolean needPlayMessage(ChatMessageCell cell, MessageObject messageObject, boolean muted) {
             if (messageObject.isVoiceOnce() || messageObject.isRoundOnce()) {
                 if (secretVoicePlayer != null && secretVoicePlayer.isShown()) return false;
