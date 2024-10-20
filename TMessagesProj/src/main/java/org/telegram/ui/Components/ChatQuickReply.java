@@ -1,13 +1,13 @@
 package org.telegram.ui.Components;
 
+import android.animation.*;
 import android.content.*;
 import android.graphics.*;
 import android.graphics.Rect;
-import android.graphics.drawable.*;
 import android.view.*;
+import android.widget.*;
 
 import androidx.annotation.*;
-import androidx.core.content.*;
 import androidx.recyclerview.widget.*;
 
 import org.telegram.messenger.*;
@@ -47,6 +47,7 @@ public abstract class ChatQuickReply {
                 delegate.onDismiss(this);
             }
         };
+        rootLayout.setOnClickListener((v) -> window.dismiss());
         window.setAnimationStyle(R.style.PopupContextAnimation);
         window.setClippingEnabled(true);
         window.setFocusable(true);
@@ -77,17 +78,20 @@ public abstract class ChatQuickReply {
 
     private static class ReplyViewGroup extends ViewGroup {
 
-        private static final int DECORATION_BOUND_SPACE = AndroidUtilities.dp(9);
-        private static final int DECORATION_INNER_SPACE = AndroidUtilities.dp(5.5f);
-        private static final int DECORATION_VERTICAL_SPACE = AndroidUtilities.dp(7);
-        private static final int SHADOW_TOP_SPACE = AndroidUtilities.dp(2);
+        private static final int DECORATION_BOUND_SPACE = AndroidUtilities.dp(3.5f);
         private static final int SHADOW_SPACE = AndroidUtilities.dp(3);
+        private static final int POSITION_RESET = -2;
 
         private final int listToButtonHeight = AndroidUtilities.dp(42);
         private final int listToNameHeight = AndroidUtilities.dp(30);
         private final RecyclerListView recyclerView;
 
+        @Nullable
+        private ValueAnimator animator;
+        @Nullable
+        private ViewAnimationState[] viewStates;
         private boolean isListAboveReplyButton = true;
+        private int selectedChildPosition = -1;
 
         public ReplyViewGroup(@NonNull Context context, @NonNull Theme.ResourcesProvider resourcesProvider) {
             super(context);
@@ -99,8 +103,38 @@ public abstract class ChatQuickReply {
                 private final RectF clipRect = new RectF();
                 private final Paint fillPaint = new Paint();
 
+                private final GestureDetector.SimpleOnGestureListener gestureListener = new GestureDetector.SimpleOnGestureListener() {
+                    @Override
+                    public boolean onDown(@NonNull MotionEvent e) {
+                        return true;
+                    }
+                    @Override
+                    public void onLongPress(@NonNull MotionEvent e) {
+                        super.onLongPress(e);
+                        isLongTapped = true;
+                    }
+                };
+                private final GestureDetector gestureDetector = new GestureDetector(getContext(), gestureListener);
+
+                private boolean isLongTapped = false;
+
                 {
                     fillPaint.setColor(Theme.getColor(Theme.key_actionBarDefaultSubmenuBackground, resourcesProvider));
+                }
+
+                @Override
+                public boolean onTouchEvent(MotionEvent e) {
+                    boolean isGestureDetectorHandled = gestureDetector.onTouchEvent(e);
+                    if (e.getAction() == MotionEvent.ACTION_MOVE) {
+                        if (isLongTapped) {
+                            View view = findChildViewUnder(e.getX(), e.getY());
+                            onListChildSelected(indexOfChild(view));
+                        }
+                    } else if (e.getAction() == MotionEvent.ACTION_UP || e.getAction() == MotionEvent.ACTION_CANCEL || e.getAction() == MotionEvent.ACTION_OUTSIDE) {
+                        onListChildSelected(POSITION_RESET);
+                        isLongTapped = false;
+                    }
+                    return isGestureDetectorHandled || isLongTapped || super.onTouchEvent(e);
                 }
 
                 @Override
@@ -135,7 +169,7 @@ public abstract class ChatQuickReply {
         protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
             int widthSize = MeasureSpec.getSize(widthMeasureSpec);
             int listWidthSpec = MeasureSpec.makeMeasureSpec(widthSize - SHADOW_SPACE * 2, MeasureSpec.EXACTLY);
-            int listHeightSpec = MeasureSpec.makeMeasureSpec(Adapter.ViewHolder.IMAGE_SIZE + DECORATION_VERTICAL_SPACE * 2, MeasureSpec.EXACTLY);
+            int listHeightSpec = MeasureSpec.makeMeasureSpec(Adapter.ViewHolder.IMAGE_LAYOUT_HEIGHT, MeasureSpec.EXACTLY);
             recyclerView.measure(listWidthSpec, listHeightSpec);
 
             int targetHeight = listToButtonHeight + recyclerView.getMeasuredHeight() + listToNameHeight;
@@ -153,11 +187,6 @@ public abstract class ChatQuickReply {
             recyclerView.layout(SHADOW_SPACE, listTop, SHADOW_SPACE + recyclerView.getMeasuredWidth(), listTop + recyclerView.getMeasuredHeight());
         }
 
-        @Override
-        protected void dispatchDraw(@NonNull Canvas canvas) {
-            super.dispatchDraw(canvas);
-        }
-
         public void setAdapter(RecyclerListView.Adapter<?> adapter) {
             recyclerView.setAdapter(adapter);
         }
@@ -169,7 +198,61 @@ public abstract class ChatQuickReply {
 
         public int getContentWidth(int itemCount) {
             return ReplyViewGroup.SHADOW_SPACE * 2 + ReplyViewGroup.DECORATION_BOUND_SPACE * 2 +
-                    Adapter.ViewHolder.IMAGE_SIZE * itemCount + ReplyViewGroup.DECORATION_INNER_SPACE * 2 * (itemCount - 1);
+                    Adapter.ViewHolder.IMAGE_LAYOUT_WIDTH * itemCount;
+        }
+
+        private void onListChildSelected(int position) {
+            if (position == selectedChildPosition) {
+                return;
+            }
+            selectedChildPosition = position;
+            recyclerView.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
+
+            if (animator != null) {
+                animator.cancel();
+            }
+            if (viewStates == null) {
+                viewStates = new ViewAnimationState[recyclerView.getChildCount()];
+                for (int i = 0; i < viewStates.length; ++i) {
+                    viewStates[i] = new ViewAnimationState(recyclerView.getChildAt(i));
+                }
+            }
+            for (int i = 0; i < viewStates.length; ++i) {
+                int targetState;
+                if (position == POSITION_RESET) {
+                    targetState = ViewAnimationState.STATE_DEFAULT;
+                } else if (i == selectedChildPosition) {
+                    targetState = ViewAnimationState.STATE_SELECTED;
+                } else {
+                    targetState = ViewAnimationState.STATE_DESELECTED;
+                }
+                viewStates[i].prepare(targetState);
+            }
+
+            animator = ValueAnimator.ofFloat(0f, 1f);
+            animator.addUpdateListener(animation -> {
+                float progress = (float) animation.getAnimatedValue();
+                for (int i = 0; i < viewStates.length; ++i) {
+                    viewStates[i].apply(progress);
+                }
+            });
+            animator.addListener(new AnimatorListenerAdapter() {
+                @Override
+                public void onAnimationEnd(Animator animation) {
+                    super.onAnimationEnd(animation);
+                    if (position == POSITION_RESET) {
+                        viewStates = null;
+                    }
+                }
+            });
+            animator.setDuration(150L);
+            animator.setInterpolator(CubicBezierInterpolator.EASE_OUT);
+            animator.start();
+
+//            for (int i = 0; i < recyclerView.getChildCount(); ++i) {
+//                View view = recyclerView.getChildAt(i);
+//                view.setAlpha(i == position || position == -2 ? 1.0f : 0.5f);
+//            }
         }
 
         private RecyclerView.ItemDecoration getItemDecoration() {
@@ -179,8 +262,6 @@ public abstract class ChatQuickReply {
                     if (parent.getAdapter() == null) {
                         return;
                     }
-                    outRect.top = outRect.bottom = DECORATION_VERTICAL_SPACE;
-                    outRect.left = outRect.right = DECORATION_INNER_SPACE;
                     int position = parent.getChildAdapterPosition(view);
                     if (position == 0) {
                         if (LocaleController.isRTL) {
@@ -198,6 +279,46 @@ public abstract class ChatQuickReply {
                     }
                 }
             };
+        }
+
+        private static class ViewAnimationState {
+
+            public static final int STATE_DEFAULT = 0;
+            public static final int STATE_SELECTED = 1;
+            public static final int STATE_DESELECTED = 2;
+
+            @NonNull
+            public final View view;
+            private float startScale = 1f;
+            private float startAlpha = 1f;
+            private float targetScale = 1f;
+            private float targetAlpha = 1f;
+
+            public ViewAnimationState(@NonNull View view) {
+                this.view = view;
+            }
+
+            public void prepare(int targetState) {
+                startAlpha = view.getAlpha();
+                startScale = view.getScaleX();
+                if (targetState == STATE_DEFAULT) {
+                    targetAlpha = 1.0f;
+                    targetScale = 1.0f;
+                } else if (targetState == STATE_SELECTED) {
+                    targetAlpha = 1.0f;
+                    targetScale = 1.1f;
+                } else if (targetState == STATE_DESELECTED) {
+                    targetAlpha = 0.5f;
+                    targetScale = 1.0f;
+                }
+            }
+
+            public void apply(float progress) {
+                view.setAlpha(AndroidUtilities.lerp(startAlpha, targetAlpha, progress));
+                float scale = AndroidUtilities.lerp(startScale, targetScale, progress);
+                view.setScaleX(scale);
+                view.setScaleY(scale);
+            }
         }
     }
 
@@ -271,18 +392,22 @@ public abstract class ChatQuickReply {
 
         static class ViewHolder extends RecyclerView.ViewHolder {
 
-            public static final int IMAGE_SIZE = AndroidUtilities.dp(42);
+            public static final int IMAGE_LAYOUT_WIDTH = AndroidUtilities.dp(53);
+            public static final int IMAGE_LAYOUT_HEIGHT = AndroidUtilities.dp(56);
 
             private final AvatarDrawable avatarDrawable = new AvatarDrawable();
             private final BackupImageView imageView;
             private final int currentAccount = UserConfig.selectedAccount;
 
             public ViewHolder(@NonNull ViewGroup parent) {
-                super(new BackupImageView(parent.getContext()));
-                imageView = (BackupImageView) this.itemView;
+                super(new FrameLayout(parent.getContext()));
+
+                imageView = new BackupImageView(parent.getContext());
                 imageView.setBackground(avatarDrawable);
-                imageView.setLayoutParams(new RecyclerView.LayoutParams(IMAGE_SIZE, IMAGE_SIZE));
-                imageView.setRoundRadius(Math.round(IMAGE_SIZE * 0.5f));
+                imageView.setRoundRadius(Math.round(AndroidUtilities.dp(42) * 0.5f));
+
+                FrameLayout frameLayout = (FrameLayout) itemView;
+                frameLayout.addView(imageView, LayoutHelper.createFrame(42, 42, Gravity.CENTER, 5.5f, 7, 5.5f, 7));
             }
 
             public void bind(@NonNull TLRPC.Dialog dialog) {
