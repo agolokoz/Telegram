@@ -4,6 +4,7 @@ import android.animation.*;
 import android.content.*;
 import android.graphics.*;
 import android.graphics.Rect;
+import android.text.*;
 import android.view.*;
 import android.widget.*;
 
@@ -11,6 +12,7 @@ import androidx.annotation.*;
 import androidx.recyclerview.widget.*;
 
 import org.telegram.messenger.*;
+import org.telegram.tgnet.*;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.*;
 import org.telegram.ui.ActionBar.*;
@@ -54,7 +56,9 @@ public abstract class ChatQuickReply {
         window.setInputMethodMode(ActionBarPopupWindow.INPUT_METHOD_NOT_NEEDED);
         window.setOutsideTouchable(true);
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_UNSPECIFIED);
+        window.setScaleOut(true);
         window.getContentView().setFocusableInTouchMode(true);
+        rootLayout.setWindow(window);
 
         int[] cellLocation = new int[2];
         cell.getLocationOnScreen(cellLocation);
@@ -64,7 +68,7 @@ public abstract class ChatQuickReply {
         View anchorView = chatActivity.getChatListView();
         int x = Math.round(xCell + (windowWidth - ChatMessageCell.SIDE_BUTTON_SIZE) * 0.5f);
         if (x + rootHorizontalSpace * 2 + windowWidth > anchorView.getWidth()) {
-            x = anchorView.getWidth() - rootHorizontalSpace * 2 - windowWidth;
+            x = anchorView.getWidth() - rootHorizontalSpace - windowWidth;
         }
         int y = Math.round(yCell + cell.sideStartY + ChatMessageCell.SIDE_BUTTON_SIZE - rootLayout.getMeasuredHeight());
         if (y <= chatActivity.getActionBar().getHeight() + AndroidUtilities.dp(9)) {
@@ -76,26 +80,42 @@ public abstract class ChatQuickReply {
         return window;
     }
 
-    private static class ReplyViewGroup extends ViewGroup {
+    public static class ReplyViewGroup extends ViewGroup {
 
         private static final int DECORATION_BOUND_SPACE = AndroidUtilities.dp(3.5f);
         private static final int SHADOW_SPACE = AndroidUtilities.dp(3);
-        private static final int POSITION_RESET = -2;
+        private static final int NAME_BG_HORIZONTAL_OFFSET = AndroidUtilities.dp(7);
+        private static final int NAME_BG_TOP_OFFSET = AndroidUtilities.dp(4);
+        private static final int NAME_BG_BOTTOM_OFFSET = AndroidUtilities.dp(3);
 
         private final int listToButtonHeight = AndroidUtilities.dp(42);
         private final int listToNameHeight = AndroidUtilities.dp(30);
+        private final List<NameState> nameStateList = new ArrayList<>();
+        private final RectF textBackgroundRect = new RectF();
+        private final Paint nameBackgroundPaint;
+        private final TextPaint nameTextPaint;
         private final RecyclerListView recyclerView;
+        private final Theme.ResourcesProvider resourcesProvider;
 
+        @Nullable
+        private ActionBarPopupWindow window;
+        @Nullable
+        private Adapter adapter;
         @Nullable
         private ValueAnimator animator;
         @Nullable
         private ViewAnimationState[] viewStates;
         private boolean isListAboveReplyButton = true;
+        private boolean isLongTapped = false;
         private int selectedChildPosition = -1;
 
         public ReplyViewGroup(@NonNull Context context, @NonNull Theme.ResourcesProvider resourcesProvider) {
             super(context);
+            this.resourcesProvider = resourcesProvider;
             setWillNotDraw(false);
+            nameBackgroundPaint = getThemedPaint(Theme.key_paint_chatActionBackground);
+            nameTextPaint = new TextPaint(getThemedPaint(Theme.key_paint_chatActionText));
+            nameTextPaint.setTextSize(AndroidUtilities.dp(12f));
 
             recyclerView = new RecyclerListView(getContext(), resourcesProvider) {
 
@@ -116,8 +136,6 @@ public abstract class ChatQuickReply {
                 };
                 private final GestureDetector gestureDetector = new GestureDetector(getContext(), gestureListener);
 
-                private boolean isLongTapped = false;
-
                 {
                     fillPaint.setColor(Theme.getColor(Theme.key_actionBarDefaultSubmenuBackground, resourcesProvider));
                 }
@@ -131,7 +149,7 @@ public abstract class ChatQuickReply {
                             onListChildSelected(indexOfChild(view));
                         }
                     } else if (e.getAction() == MotionEvent.ACTION_UP || e.getAction() == MotionEvent.ACTION_CANCEL || e.getAction() == MotionEvent.ACTION_OUTSIDE) {
-                        onListChildSelected(POSITION_RESET);
+                        onListChildSelected(-1);
                         isLongTapped = false;
                     }
                     return isGestureDetectorHandled || isLongTapped || super.onTouchEvent(e);
@@ -165,6 +183,25 @@ public abstract class ChatQuickReply {
             addView(recyclerView);
         }
 
+        public void passTouchEvent(MotionEvent ev) {
+            if (ev.getAction() == MotionEvent.ACTION_CANCEL || ev.getAction() == MotionEvent.ACTION_UP || ev.getAction() == MotionEvent.ACTION_OUTSIDE) {
+                isLongTapped = false;
+                if (window != null) {
+                    window.dismiss();
+                }
+                return;
+            } else {
+                isLongTapped = true;
+            }
+            MotionEvent newEvent = MotionEvent.obtain(ev);
+            newEvent.offsetLocation(-recyclerView.getLeft(), -recyclerView.getTop());
+            recyclerView.onTouchEvent(newEvent);
+        }
+
+        public void setWindow(ActionBarPopupWindow window) {
+            this.window = window;
+        }
+
         @Override
         protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
             int widthSize = MeasureSpec.getSize(widthMeasureSpec);
@@ -172,13 +209,14 @@ public abstract class ChatQuickReply {
             int listHeightSpec = MeasureSpec.makeMeasureSpec(Adapter.ViewHolder.IMAGE_LAYOUT_HEIGHT, MeasureSpec.EXACTLY);
             recyclerView.measure(listWidthSpec, listHeightSpec);
 
-            int targetHeight = listToButtonHeight + recyclerView.getMeasuredHeight() + listToNameHeight;
+            int targetHeight = listToButtonHeight + recyclerView.getMeasuredHeight() +
+                    (isListAboveReplyButton ? listToNameHeight : 0);
             setMeasuredDimension(widthSize, targetHeight);
         }
 
         @Override
         protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
-            int listTop = 0;
+            int listTop;
             if (isListAboveReplyButton) {
                 listTop = listToNameHeight;
             } else {
@@ -187,7 +225,39 @@ public abstract class ChatQuickReply {
             recyclerView.layout(SHADOW_SPACE, listTop, SHADOW_SPACE + recyclerView.getMeasuredWidth(), listTop + recyclerView.getMeasuredHeight());
         }
 
-        public void setAdapter(RecyclerListView.Adapter<?> adapter) {
+        @Override
+        protected void onDraw(@NonNull Canvas canvas) {
+            super.onDraw(canvas);
+            float topOffset = isListAboveReplyButton ? 0f : (listToButtonHeight - listToNameHeight);
+
+            for (int i = 0; i < nameStateList.size(); ++i) {
+                StaticLayout staticLayout = nameStateList.get(i).staticLayout;
+                int alpha = Math.round(255 * nameStateList.get(i).currentProgress);
+
+                textBackgroundRect.set(-NAME_BG_HORIZONTAL_OFFSET, -NAME_BG_TOP_OFFSET, staticLayout.getWidth() + NAME_BG_HORIZONTAL_OFFSET, staticLayout.getHeight() + NAME_BG_BOTTOM_OFFSET);
+
+                canvas.save();
+                canvas.translate(nameStateList.get(i).x, topOffset + NAME_BG_TOP_OFFSET);
+                float scale = 0.8f + 0.2f * nameStateList.get(i).currentProgress;
+                canvas.scale(scale, scale, textBackgroundRect.centerX(), textBackgroundRect.bottom + textBackgroundRect.height() * 0.5f);
+
+                float radius = textBackgroundRect.height() * 0.5f;
+                int savedBackgroundAlpha = nameBackgroundPaint.getAlpha();
+                nameBackgroundPaint.setAlpha(Math.round(savedBackgroundAlpha / 255f * alpha));
+                canvas.drawRoundRect(textBackgroundRect, radius, radius, nameBackgroundPaint);
+                nameBackgroundPaint.setAlpha(savedBackgroundAlpha);
+
+                int savedTextAlpha = staticLayout.getPaint().getAlpha();
+                staticLayout.getPaint().setAlpha(alpha);
+                nameStateList.get(i).staticLayout.draw(canvas);
+                staticLayout.getPaint().setAlpha(savedTextAlpha);
+
+                canvas.restore();
+            }
+        }
+
+        public void setAdapter(@NonNull Adapter adapter) {
+            this.adapter = adapter;
             recyclerView.setAdapter(adapter);
         }
 
@@ -205,12 +275,13 @@ public abstract class ChatQuickReply {
             if (position == selectedChildPosition) {
                 return;
             }
-            selectedChildPosition = position;
-            recyclerView.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
 
             if (animator != null) {
                 animator.cancel();
             }
+
+            selectedChildPosition = position;
+            recyclerView.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
             if (viewStates == null) {
                 viewStates = new ViewAnimationState[recyclerView.getChildCount()];
                 for (int i = 0; i < viewStates.length; ++i) {
@@ -219,7 +290,7 @@ public abstract class ChatQuickReply {
             }
             for (int i = 0; i < viewStates.length; ++i) {
                 int targetState;
-                if (position == POSITION_RESET) {
+                if (position < 0) {
                     targetState = ViewAnimationState.STATE_DEFAULT;
                 } else if (i == selectedChildPosition) {
                     targetState = ViewAnimationState.STATE_SELECTED;
@@ -229,30 +300,66 @@ public abstract class ChatQuickReply {
                 viewStates[i].prepare(targetState);
             }
 
+            View selectedView = recyclerView.getChildAt(position);
+            TLRPC.Dialog dialog = null;
+            if (selectedView != null && adapter != null) {
+                int adapterPosition = recyclerView.getChildAdapterPosition(selectedView);
+                dialog = adapter.getItemAt(adapterPosition);
+            }
+            boolean isDialogFound = false;
+            for (int i = 0; i < nameStateList.size(); ++i) {
+                if (dialog != null && nameStateList.get(i).dialogId == dialog.id) {
+                    nameStateList.get(i).prepare(1.0f);
+                    isDialogFound = true;
+                } else {
+                    nameStateList.get(i).prepare(0.0f);
+                }
+            }
+            if (!isDialogFound && dialog != null) {
+                String name = getDialogName(dialog);
+                if (!TextUtils.isEmpty(name)) {
+                    int width = (int) Math.ceil(nameTextPaint.measureText(name));
+                    StaticLayout staticLayout = new StaticLayout(name, nameTextPaint, width, Layout.Alignment.ALIGN_NORMAL, 1.0f, 0.0f, false);
+                    float x = (selectedView.getLeft() + selectedView.getWidth() * 0.5f) - width * 0.5f;
+                    if (x - NAME_BG_HORIZONTAL_OFFSET < SHADOW_SPACE) {
+                        x = SHADOW_SPACE + NAME_BG_HORIZONTAL_OFFSET;
+                    } else if (x + NAME_BG_HORIZONTAL_OFFSET * 2 + width >= getWidth() - SHADOW_SPACE) {
+                        x = getWidth() - SHADOW_SPACE - width - NAME_BG_HORIZONTAL_OFFSET * 2;
+                    }
+                    NameState state = new NameState(dialog.id, x, staticLayout);
+                    state.prepare(1.0f);
+                    nameStateList.add(state);
+                }
+            }
+
             animator = ValueAnimator.ofFloat(0f, 1f);
             animator.addUpdateListener(animation -> {
                 float progress = (float) animation.getAnimatedValue();
                 for (int i = 0; i < viewStates.length; ++i) {
                     viewStates[i].apply(progress);
                 }
+                for (int i = 0; i < nameStateList.size(); ++i) {
+                    nameStateList.get(i).apply(progress);
+                }
+                invalidate();
             });
             animator.addListener(new AnimatorListenerAdapter() {
                 @Override
                 public void onAnimationEnd(Animator animation) {
                     super.onAnimationEnd(animation);
-                    if (position == POSITION_RESET) {
+                    if (position < 0) {
                         viewStates = null;
+                    }
+                    for (int i = nameStateList.size() - 1; i >= 0; --i) {
+                        if (nameStateList.get(i).currentProgress == 0.0f) {
+                            nameStateList.remove(i);
+                        }
                     }
                 }
             });
             animator.setDuration(150L);
             animator.setInterpolator(CubicBezierInterpolator.EASE_OUT);
             animator.start();
-
-//            for (int i = 0; i < recyclerView.getChildCount(); ++i) {
-//                View view = recyclerView.getChildAt(i);
-//                view.setAlpha(i == position || position == -2 ? 1.0f : 0.5f);
-//            }
         }
 
         private RecyclerView.ItemDecoration getItemDecoration() {
@@ -279,6 +386,20 @@ public abstract class ChatQuickReply {
                     }
                 }
             };
+        }
+
+        @Nullable
+        private String getDialogName(TLRPC.Dialog dialog) {
+            int currentAccount = UserConfig.selectedAccount;
+            TLObject object = DialogObject.isUserDialog(dialog.id)
+                    ? MessagesController.getInstance(currentAccount).getUser(dialog.id)
+                    : MessagesController.getInstance(currentAccount).getChat(-dialog.id);
+            return object == null ? null : DialogObject.getDialogTitle(object);
+        }
+
+        protected Paint getThemedPaint(String paintKey) {
+            Paint paint = resourcesProvider != null ? resourcesProvider.getPaint(paintKey) : null;
+            return paint != null ? paint : Theme.getThemePaint(paintKey);
         }
 
         private static class ViewAnimationState {
@@ -322,6 +443,31 @@ public abstract class ChatQuickReply {
         }
     }
 
+    private static class NameState {
+
+        public final long dialogId;
+        public final float x;
+        public final StaticLayout staticLayout;
+
+        public float currentProgress = 0.0f;
+        private float startProgress = 0.0f;
+        private float targetProgress = 0.0f;
+
+        public NameState(long id, float x, StaticLayout staticLayout) {
+            this.dialogId = id;
+            this.x = x;
+            this.staticLayout = staticLayout;
+        }
+
+        public void prepare(float targetProgress) {
+            this.startProgress = currentProgress;
+            this.targetProgress = targetProgress;
+        }
+
+        public void apply(float progress) {
+            currentProgress = AndroidUtilities.lerp(startProgress, targetProgress, progress);
+        }
+    }
 
     private static class Adapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
 
@@ -347,6 +493,14 @@ public abstract class ChatQuickReply {
         @Override
         public int getItemCount() {
             return dialogs.size();
+        }
+
+        @Nullable
+        public TLRPC.Dialog getItemAt(int position) {
+            if (position < 0 || dialogs.size() <= position) {
+                return null;
+            }
+            return dialogs.get(position);
         }
 
         public void fetchDialogs() {

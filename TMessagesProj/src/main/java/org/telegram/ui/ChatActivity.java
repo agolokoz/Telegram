@@ -342,6 +342,7 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
     private ClippingImageView animatingImageView;
     private ThanosEffect chatListThanosEffect;
     private RecyclerListView chatListView;
+    private View.OnTouchListener chatListViewTouchInterceptor;
     private ChatListItemAnimator chatListItemAnimator;
     private GridLayoutManagerFixed chatLayoutManager;
     private ChatActivityAdapter chatAdapter;
@@ -4517,6 +4518,11 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
 
             @Override
             public boolean onTouchEvent(MotionEvent e) {
+                if (chatListViewTouchInterceptor != null) {
+                    if (chatListViewTouchInterceptor.onTouch(this, e)) {
+                        return true;
+                    }
+                }
                 textSelectionHelper.checkSelectionCancel(e);
                 if (e.getAction() == MotionEvent.ACTION_DOWN) {
                     scrollByTouch = true;
@@ -35352,6 +35358,7 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
             ChatQuickReply.Delegate delegate = new ChatQuickReply.Delegate() {
                 @Override
                 public void onDismiss(@NonNull ActionBarPopupWindow window) {
+                    chatListViewTouchInterceptor = null;
                     ChatQuickReply.Delegate.super.onDismiss(window);
                     if (scrimPopupWindow == window) {
                         scrimPopupWindow = null;
@@ -35359,6 +35366,15 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
                 }
             };
             scrimPopupWindow = ChatQuickReply.show(ChatActivity.this, cell, delegate);
+            int[] windowViewLocation = new int[2];
+            ChatQuickReply.ReplyViewGroup viewGroup = (ChatQuickReply.ReplyViewGroup) scrimPopupWindow.getContentView();
+            chatListViewTouchInterceptor = (v, event) -> {
+                viewGroup.getLocationOnScreen(windowViewLocation);
+                MotionEvent newEvent = MotionEvent.obtain(event);
+                newEvent.offsetLocation(-windowViewLocation[0], -windowViewLocation[1]);
+                viewGroup.passTouchEvent(newEvent);
+                return true;
+            };
             return true;
         }
 
