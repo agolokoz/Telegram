@@ -35353,28 +35353,31 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
             }
         }
 
+        @SuppressLint("ClickableViewAccessibility")
         @Override
         public boolean didLongPressSideButton(ChatMessageCell cell) {
             ChatQuickReply.Delegate delegate = new ChatQuickReply.Delegate() {
                 @Override
-                public void onDismiss(@NonNull ActionBarPopupWindow window) {
+                public void onClose() {
+                    cell.setOnTouchDelegate(null);
                     chatListViewTouchInterceptor = null;
-                    ChatQuickReply.Delegate.super.onDismiss(window);
-                    if (scrimPopupWindow == window) {
-                        scrimPopupWindow = null;
-                    }
                 }
             };
-            scrimPopupWindow = ChatQuickReply.show(ChatActivity.this, cell, delegate);
-            int[] windowViewLocation = new int[2];
-            ChatQuickReply.ReplyViewGroup viewGroup = (ChatQuickReply.ReplyViewGroup) scrimPopupWindow.getContentView();
+            final ChatQuickReply.ReplyViewGroup viewGroup = ChatQuickReply.show(ChatActivity.this, cell, delegate);
+            cell.setOnTouchDelegate((v, event) -> {
+                viewGroup.passTouchEvent(event);
+                return true;
+            });
+
+            int[] viewGroupLocation = new int[2];
             chatListViewTouchInterceptor = (v, event) -> {
-                viewGroup.getLocationOnScreen(windowViewLocation);
+                viewGroup.getLocationOnScreen(viewGroupLocation);
                 MotionEvent newEvent = MotionEvent.obtain(event);
-                newEvent.offsetLocation(-windowViewLocation[0], -windowViewLocation[1]);
+                newEvent.offsetLocation(-viewGroupLocation[0], -viewGroupLocation[1]);
                 viewGroup.passTouchEvent(newEvent);
                 return true;
             };
+
             return true;
         }
 

@@ -1584,6 +1584,7 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
     private Theme.ResourcesProvider resourcesProvider;
     private final boolean canDrawBackgroundInParent;
     private ChatMessageSharedResources sharedResources;
+    private View.OnTouchListener touchDelegate;
 
     // Public for enter transition
     public List<SpoilerEffect> replySpoilers = new ArrayList<>();
@@ -3893,6 +3894,12 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
+        if (touchDelegate != null) {
+            if (touchDelegate.onTouch(this, event)) {
+                return true;
+            }
+        }
+
         if (currentMessageObject == null || delegate != null && !delegate.canPerformActions() || animationRunning) {
             if (currentMessageObject != null && currentMessageObject.preview) {
                 return checkTextSelection(event);
@@ -24846,5 +24853,9 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
             return lerp(transitionParams.animateFromWidthForButton, widthForButtons, transitionParams.animateChangeProgress);
         }
         return widthForButtons;
+    }
+
+    public void setOnTouchDelegate(@Nullable View.OnTouchListener delegate) {
+        touchDelegate = delegate;
     }
 }

@@ -1,14 +1,19 @@
 package org.telegram.ui.Components;
 
+import static org.telegram.ui.Components.LayoutHelper.WRAP_CONTENT;
+
 import android.animation.*;
+import android.annotation.*;
 import android.content.*;
 import android.graphics.*;
 import android.graphics.Rect;
 import android.text.*;
 import android.view.*;
+import android.view.animation.*;
 import android.widget.*;
 
 import androidx.annotation.*;
+import androidx.core.math.*;
 import androidx.recyclerview.widget.*;
 
 import org.telegram.messenger.*;
@@ -25,13 +30,14 @@ public abstract class ChatQuickReply {
     /**
      * TODO NotificationCenter.dialogsNeedReload
      * TODO check after first install, (item count could be less than 5)
-     * TODO layout for top anchored cell
      */
-    public static ActionBarPopupWindow show(@NonNull ChatActivity chatActivity, @NonNull ChatMessageCell cell, @NonNull Delegate delegate) {
+    @SuppressLint("ClickableViewAccessibility")
+    public static ReplyViewGroup show(@NonNull ChatActivity chatActivity, @NonNull ChatMessageCell cell, @NonNull Delegate delegate) {
         int rootHorizontalSpace = AndroidUtilities.dp(3);
 
         ReplyViewGroup rootLayout = new ReplyViewGroup(chatActivity);
         rootLayout.setAdapter(new Adapter());
+        rootLayout.setDelegate(delegate);
 
         int itemCount = 5 + 1;
         int windowWidth;
@@ -40,24 +46,6 @@ public abstract class ChatQuickReply {
             windowWidth = rootLayout.getContentWidth(itemCount);
         } while (windowWidth + rootHorizontalSpace * 2 >= AndroidUtilities.displaySize.x);
         rootLayout.measure(View.MeasureSpec.makeMeasureSpec(windowWidth, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
-
-        ActionBarPopupWindow window = new ActionBarPopupWindow(rootLayout, windowWidth, LayoutHelper.WRAP_CONTENT) {
-            @Override
-            public void dismiss() {
-                super.dismiss();
-                delegate.onDismiss(this);
-            }
-        };
-        rootLayout.setOnClickListener((v) -> window.dismiss());
-        window.setAnimationStyle(R.style.PopupContextAnimation);
-        window.setClippingEnabled(true);
-        window.setFocusable(true);
-        window.setInputMethodMode(ActionBarPopupWindow.INPUT_METHOD_NOT_NEEDED);
-        window.setOutsideTouchable(true);
-        window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_UNSPECIFIED);
-        window.setScaleOut(true);
-        window.getContentView().setFocusableInTouchMode(true);
-        rootLayout.setWindow(window);
 
         int[] cellLocation = new int[2];
         cell.getLocationOnScreen(cellLocation);
@@ -74,11 +62,15 @@ public abstract class ChatQuickReply {
             rootLayout.setListAboveReplyButton(false);
             y = Math.round(yCell + cell.sideStartY);
         }
-        window.showAtLocation(anchorView, Gravity.NO_GRAVITY, x, y);
 
-        return window;
+        chatActivity.getLayoutContainer().addView(rootLayout, windowWidth, WRAP_CONTENT);
+        rootLayout.setTranslationX(x);
+        rootLayout.setTranslationY(y);
+
+        return rootLayout;
     }
 
+    @SuppressLint("ViewConstructor")
     public static class ReplyViewGroup extends ViewGroup {
 
         private static final int DECORATION_BOUND_SPACE = AndroidUtilities.dp(3.5f);
@@ -87,25 +79,25 @@ public abstract class ChatQuickReply {
         private static final int NAME_BG_TOP_OFFSET = AndroidUtilities.dp(4);
         private static final int NAME_BG_BOTTOM_OFFSET = AndroidUtilities.dp(3);
 
-        private final BaseFragment fragment;
         private final int listToButtonHeight = AndroidUtilities.dp(42);
         private final int listToNameHeight = AndroidUtilities.dp(30);
         private final List<NameState> nameStateList = new ArrayList<>();
         private final RectF textBackgroundRect = new RectF();
+        private final BaseFragment fragment;
         private final Paint nameBackgroundPaint;
         private final TextPaint nameTextPaint;
         private final RecyclerListView recyclerView;
 
         @Nullable
-        private ActionBarPopupWindow window;
-        @Nullable
         private Adapter adapter;
+        @Nullable
+        private Delegate delegate;
         @Nullable
         private ValueAnimator animator;
         @Nullable
         private ViewAnimationState[] viewStates;
         private boolean isListAboveReplyButton = true;
-        private boolean isLongTapped = false;
+        private boolean isLongTapped = true;
         private int selectedChildViewPosition = -1;
 
         public ReplyViewGroup(@NonNull BaseFragment fragment) {
@@ -197,40 +189,6 @@ public abstract class ChatQuickReply {
             addView(recyclerView);
         }
 
-        public void passTouchEvent(MotionEvent ev) {
-            if (ev.getAction() == MotionEvent.ACTION_CANCEL || ev.getAction() == MotionEvent.ACTION_UP || ev.getAction() == MotionEvent.ACTION_OUTSIDE) {
-                shareToDialog(recyclerView.getChildAt(selectedChildViewPosition));
-                isLongTapped = false;
-                if (window != null) {
-                    window.dismiss();
-                }
-                return;
-            } else {
-                isLongTapped = true;
-            }
-            MotionEvent newEvent = MotionEvent.obtain(ev);
-            newEvent.offsetLocation(-recyclerView.getLeft(), -recyclerView.getTop());
-            recyclerView.onTouchEvent(newEvent);
-        }
-
-        public void setWindow(@Nullable ActionBarPopupWindow window) {
-            this.window = window;
-        }
-
-        public void shareToDialog(View view) {
-            int position = recyclerView.getChildAdapterPosition(view);
-            TLRPC.Dialog dialog = adapter.getItemAt(position);
-            if (dialog == null) {
-                return;
-            }
-
-            if (window != null) {
-                window.dismiss();
-            }
-            Bulletin bulletin = BulletinFactory.createForwardedBulletin(fragment.getContext(), fragment.getLayoutContainer(), 1, dialog.id, 1, fragment.getThemedColor(Theme.key_undo_background), fragment.getThemedColor(Theme.key_undo_infoColor));
-            bulletin.show();
-        }
-
         @Override
         protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
             int widthSize = MeasureSpec.getSize(widthMeasureSpec);
@@ -288,6 +246,10 @@ public abstract class ChatQuickReply {
         public void setAdapter(@NonNull Adapter adapter) {
             this.adapter = adapter;
             recyclerView.setAdapter(adapter);
+        }
+
+        public void setDelegate(@Nullable Delegate delegate) {
+            this.delegate = delegate;
         }
 
         public void setListAboveReplyButton(boolean isAbove) {
@@ -391,6 +353,121 @@ public abstract class ChatQuickReply {
             animator.start();
         }
 
+        public void passTouchEvent(MotionEvent ev) {
+            if (ev.getAction() == MotionEvent.ACTION_CANCEL) {
+                return;
+            }
+            if (ev.getAction() == MotionEvent.ACTION_UP) {
+                shareToDialog(recyclerView.getChildAt(selectedChildViewPosition));
+                isLongTapped = false;
+                animateClose();
+                return;
+            } else {
+                isLongTapped = true;
+            }
+            MotionEvent newEvent = MotionEvent.obtain(ev);
+            newEvent.offsetLocation(-recyclerView.getLeft(), -recyclerView.getTop());
+            recyclerView.onTouchEvent(newEvent);
+        }
+
+        private void animateClose() {
+            animate().alpha(0.0f).scaleX(0.8f).scaleY(0.8f).setDuration(125)
+                    .setListener(new AnimatorListenerAdapter() {
+                        @Override
+                        public void onAnimationEnd(Animator animation) {
+                            super.onAnimationEnd(animation);
+                            ViewParent parent = getParent();
+                            if (parent != null) {
+                                ((ViewGroup) parent).removeView(ReplyViewGroup.this);
+                            }
+                            if (delegate != null) {
+                                delegate.onClose();
+                            }
+                        }
+                    })
+                    .start();
+        }
+
+        private void shareToDialog(View view) {
+            int position = recyclerView.getChildAdapterPosition(view);
+            TLRPC.Dialog dialog = adapter.getItemAt(position);
+            if (dialog == null) {
+                return;
+            }
+
+            Bulletin bulletin = BulletinFactory.createForwardedBulletin(fragment.getContext(), fragment.getLayoutContainer(), 1, dialog.id, 1, fragment.getThemedColor(Theme.key_undo_background), fragment.getThemedColor(Theme.key_undo_infoColor));
+            Bulletin.Layout bulletinLayout = bulletin.getLayout();
+            bulletin.show();
+
+            if (bulletinLayout instanceof Bulletin.LottieLayout) {
+                Bulletin.LottieLayout lottieLayout = (Bulletin.LottieLayout) bulletinLayout;
+                lottieLayout.isAutoPlay = false;
+                bulletinLayout.addCallback(getBulletinCallback(((ViewGroup) view).getChildAt(0)));
+            }
+        }
+
+        private Bulletin.Layout.Callback getBulletinCallback(View sharedView) {
+            return new Bulletin.Layout.Callback() {
+
+                @Override
+                public void onEnterTransitionStart(@NonNull Bulletin.Layout layout) {
+                    Bulletin.Layout.Callback.super.onEnterTransitionStart(layout);
+                    Bulletin.LottieLayout lottieLayout = ((Bulletin.LottieLayout) layout);
+
+                    final int[] imageLocation = new int[2];
+                    lottieLayout.imageView.getLocationOnScreen(imageLocation);
+                    lottieLayout.imageView.setScaleX(0f);
+                    lottieLayout.imageView.setScaleY(0f);
+
+                    final int[] viewLocation = new int[2];
+                    sharedView.getLocationOnScreen(viewLocation);
+
+                    final int sharedViewSize = Math.round(sharedView.getWidth() * sharedView.getScaleX());
+                    final float xTranslationDiff = (imageLocation[0] + lottieLayout.imageView.getWidth() * 0.5f) - (viewLocation[0] + sharedViewSize * 0.5f);
+                    final float yTranslationDiff = (imageLocation[1] - lottieLayout.getTranslationY() + lottieLayout.imageView.getHeight() * 0.5f) - (viewLocation[1] + sharedViewSize * 0.5f);
+                    final float targetScale = AndroidUtilities.dpf2(27) / sharedViewSize;
+
+                    ViewParent parent = sharedView.getParent();
+                    if (parent != null) {
+                        ((ViewGroup) parent).removeView(sharedView);
+                    }
+                    fragment.getLayoutContainer().addView(sharedView, sharedViewSize, sharedViewSize);
+                    sharedView.setTranslationX(viewLocation[0]);
+                    sharedView.setTranslationY(viewLocation[1]);
+
+                    int alphaTranslation = Math.round(sharedViewSize * targetScale * 0.5f);
+                    ValueAnimator moveViewAnimator = ValueAnimator.ofFloat(0f, 1f);
+                    moveViewAnimator.addUpdateListener(animation -> {
+                        float progress = (float) animation.getAnimatedValue();
+                        float scale = targetScale + (1f - targetScale) * (1f - progress);
+                        sharedView.setScaleX(scale);
+                        sharedView.setScaleY(scale);
+
+                        float yTrans = yTranslationDiff * getProgressValue(progress);
+                        sharedView.setTranslationX(viewLocation[0] + xTranslationDiff * progress);
+                        sharedView.setTranslationY(viewLocation[1] + yTrans);
+
+                        if (yTranslationDiff - yTrans < alphaTranslation) {
+                            float alphaProgress = (yTranslationDiff - yTrans) / alphaTranslation;
+                            sharedView.setAlpha(alphaProgress);
+                            if (!lottieLayout.imageView.isPlaying()) {
+                                lottieLayout.imageView.playAnimation();
+                            }
+                            lottieLayout.imageView.setScaleX(1f - alphaProgress);
+                            lottieLayout.imageView.setScaleY(1f - alphaProgress);
+                        }
+                    });
+                    moveViewAnimator.setInterpolator(CubicBezierInterpolator.DEFAULT);
+                    moveViewAnimator.setDuration(Bulletin.Layout.DefaultTransition.DefaultDuration);
+                    moveViewAnimator.start();
+                }
+
+                private float getProgressValue(float progress) {
+                    return progress * progress * progress * progress * progress;
+                }
+            };
+        }
+
         private RecyclerView.ItemDecoration getItemDecoration() {
             return new RecyclerView.ItemDecoration() {
                 @Override
@@ -426,7 +503,7 @@ public abstract class ChatQuickReply {
             return object == null ? null : DialogObject.getDialogTitle(object);
         }
 
-        protected Paint getThemedPaint(String paintKey) {
+        private Paint getThemedPaint(String paintKey) {
             Paint paint = fragment.getResourceProvider() != null ? fragment.getResourceProvider().getPaint(paintKey) : null;
             return paint != null ? paint : Theme.getThemePaint(paintKey);
         }
@@ -498,7 +575,7 @@ public abstract class ChatQuickReply {
         }
     }
 
-    private static class Adapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
+    public static class Adapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
 
         private final List<TLRPC.Dialog> dialogs = new ArrayList<>();
 
@@ -592,7 +669,8 @@ public abstract class ChatQuickReply {
                 imageView.setRoundRadius(Math.round(AndroidUtilities.dp(42) * 0.5f));
 
                 FrameLayout frameLayout = (FrameLayout) itemView;
-                frameLayout.addView(imageView, LayoutHelper.createFrame(42, 42, Gravity.CENTER, 5.5f, 7, 5.5f, 7));
+                frameLayout.addView(imageView, LayoutHelper.createFrame(42, 42, Gravity.CENTER));
+                frameLayout.setLayoutParams(new RecyclerView.LayoutParams(IMAGE_LAYOUT_WIDTH, IMAGE_LAYOUT_HEIGHT));
             }
 
             public void bind(@NonNull TLRPC.Dialog dialog) {
@@ -617,6 +695,6 @@ public abstract class ChatQuickReply {
 
     public interface Delegate {
 
-        default void onDismiss(@NonNull ActionBarPopupWindow window) {}
+        default void onClose() {}
     }
 }
