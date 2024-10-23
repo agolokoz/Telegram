@@ -7,7 +7,9 @@ import android.annotation.*;
 import android.content.*;
 import android.graphics.*;
 import android.graphics.Rect;
+import android.os.*;
 import android.text.*;
+import android.text.style.*;
 import android.view.*;
 import android.view.animation.*;
 import android.widget.*;
@@ -390,20 +392,53 @@ public abstract class ChatQuickReply {
 
         private void shareToDialog(View view) {
             int position = recyclerView.getChildAdapterPosition(view);
-            TLRPC.Dialog dialog = adapter.getItemAt(position);
+            final TLRPC.Dialog dialog = adapter.getItemAt(position);
             if (dialog == null) {
                 return;
             }
 
             Bulletin bulletin = BulletinFactory.createForwardedBulletin(fragment.getContext(), fragment.getLayoutContainer(), 1, dialog.id, 1, fragment.getThemedColor(Theme.key_undo_background), fragment.getThemedColor(Theme.key_undo_infoColor));
             Bulletin.Layout bulletinLayout = bulletin.getLayout();
-            bulletin.show();
-
             if (bulletinLayout instanceof Bulletin.LottieLayout) {
                 Bulletin.LottieLayout lottieLayout = (Bulletin.LottieLayout) bulletinLayout;
+                CharSequence sequence = lottieLayout.textView.getText();
+                if (sequence instanceof SpannedString && UserConfig.getInstance(UserConfig.selectedAccount).clientUserId != dialog.id) {
+                    SpannedString string = (SpannedString) sequence;
+                    TypefaceSpan[] typefaceSpans = string.getSpans(0, string.length(), TypefaceSpan.class);
+                    if (typefaceSpans != null && typefaceSpans.length > 0) {
+                        int start = string.getSpanStart(typefaceSpans[0]);
+                        int end = string.getSpanEnd(typefaceSpans[0]);
+                        SpannableStringBuilder builder = new SpannableStringBuilder(string);
+                        builder.setSpan(fragment.getThemedColor(Theme.key_undo_infoColor), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                        builder.setSpan(new ClickableSpan() {
+                            @Override
+                            public void onClick(@NonNull View widget) {
+                                onBulletinNameClicked(dialog);
+                            }
+                            @Override
+                            public void updateDrawState(@NonNull TextPaint ds) {
+                                super.updateDrawState(ds);
+                                ds.setUnderlineText(false);
+                            }
+                        }, start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                        lottieLayout.textView.setText(builder);
+                    }
+                }
                 lottieLayout.isAutoPlay = false;
                 bulletinLayout.addCallback(getBulletinCallback(((ViewGroup) view).getChildAt(0)));
             }
+            bulletin.show();
+        }
+
+        private void onBulletinNameClicked(TLRPC.Dialog dialog) {
+            TLRPC.User user = null;
+            TLRPC.Chat chat = null;
+            if (DialogObject.isUserDialog(dialog.id)) {
+                user = MessagesController.getInstance(UserConfig.selectedAccount).getUser(dialog.id);
+            } else {
+                chat = MessagesController.getInstance(UserConfig.selectedAccount).getChat(-dialog.id);
+            }
+            fragment.getMessagesController().openChatOrProfileWith(user, chat, fragment, 1, false);
         }
 
         private Bulletin.Layout.Callback getBulletinCallback(View sharedView) {
