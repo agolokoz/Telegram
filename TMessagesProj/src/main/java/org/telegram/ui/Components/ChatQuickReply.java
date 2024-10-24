@@ -4,19 +4,21 @@ import static org.telegram.ui.Components.LayoutHelper.WRAP_CONTENT;
 
 import android.animation.*;
 import android.annotation.*;
-import android.content.*;
 import android.graphics.*;
 import android.graphics.Rect;
-import android.os.*;
+import android.graphics.drawable.*;
 import android.text.*;
 import android.text.style.*;
 import android.view.*;
 import android.view.animation.*;
+import android.view.animation.Interpolator;
 import android.widget.*;
 
 import androidx.annotation.*;
-import androidx.core.math.*;
+import androidx.core.content.*;
 import androidx.recyclerview.widget.*;
+
+import com.google.zxing.common.detector.*;
 
 import org.telegram.messenger.*;
 import org.telegram.tgnet.*;
@@ -40,6 +42,8 @@ public abstract class ChatQuickReply {
         ReplyViewGroup rootLayout = new ReplyViewGroup(chatActivity);
         rootLayout.setAdapter(new Adapter());
         rootLayout.setDelegate(delegate);
+        rootLayout.setClipChildren(false);
+        rootLayout.setClipToPadding(false);
 
         int itemCount = 5 + 1;
         int windowWidth;
@@ -51,23 +55,26 @@ public abstract class ChatQuickReply {
 
         int[] cellLocation = new int[2];
         cell.getLocationOnScreen(cellLocation);
-        int xCell = cellLocation[0];
-        int yCell = cellLocation[1];
 
         View anchorView = chatActivity.getChatListView();
-        int x = Math.round(xCell + (windowWidth - ChatMessageCell.SIDE_BUTTON_SIZE) * 0.5f);
+        int x = Math.round(cellLocation[0] + cell.sideStartX + ChatMessageCell.SIDE_BUTTON_SIZE * 0.5f - windowWidth * 0.5f);
         if (x + rootHorizontalSpace * 2 + windowWidth > anchorView.getWidth()) {
             x = anchorView.getWidth() - rootHorizontalSpace - windowWidth;
         }
-        int y = Math.round(yCell + cell.sideStartY + ChatMessageCell.SIDE_BUTTON_SIZE - rootLayout.getMeasuredHeight());
+        int y = Math.round(cellLocation[1] + cell.sideStartY + ChatMessageCell.SIDE_BUTTON_SIZE - rootLayout.getMeasuredHeight());
         if (y <= chatActivity.getActionBar().getHeight() + AndroidUtilities.dp(9)) {
             rootLayout.setListAboveReplyButton(false);
-            y = Math.round(yCell + cell.sideStartY);
+            y = Math.round(cellLocation[1] + cell.sideStartY);
         }
-
-        chatActivity.getLayoutContainer().addView(rootLayout, windowWidth, WRAP_CONTENT);
         rootLayout.setTranslationX(x);
         rootLayout.setTranslationY(y);
+        rootLayout.setVisibility(View.INVISIBLE);
+
+        chatActivity.getLayoutContainer().addView(rootLayout, windowWidth, WRAP_CONTENT);
+        RectF sideButtonRect = new RectF(cellLocation[0] + cell.sideStartX - x, cellLocation[1] + cell.sideStartY - y, 0, 0);
+        sideButtonRect.right = sideButtonRect.left + ChatMessageCell.SIDE_BUTTON_SIZE;
+        sideButtonRect.bottom = sideButtonRect.top + ChatMessageCell.SIDE_BUTTON_SIZE;
+        AndroidUtilities.runOnUIThread(() -> rootLayout.openAnimation(sideButtonRect), 64);
 
         return rootLayout;
     }
@@ -90,17 +97,25 @@ public abstract class ChatQuickReply {
         private final TextPaint nameTextPaint;
         private final RecyclerListView recyclerView;
 
+        private final RectF bubbleRect = new RectF();
+        private final Paint bubblePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Path bubblePath = new Path();
+        private final Drawable shadowDrawable = ContextCompat.getDrawable(getContext(), R.drawable.reactions_bubble_shadow);
+
         @Nullable
         private Adapter adapter;
         @Nullable
         private Delegate delegate;
         @Nullable
-        private ValueAnimator animator;
+        private ValueAnimator dialogSelectedAnimator;
+        @Nullable
+        private AnimatorSet openAnimator;
         @Nullable
         private ViewAnimationState[] viewStates;
         private boolean isListAboveReplyButton = true;
         private boolean isLongTapped = true;
         private int selectedChildViewPosition = -1;
+        private boolean prevClipChildren = false;
 
         public ReplyViewGroup(@NonNull BaseFragment fragment) {
             super(fragment.getContext());
@@ -109,6 +124,8 @@ public abstract class ChatQuickReply {
             nameBackgroundPaint = getThemedPaint(Theme.key_paint_chatActionBackground);
             nameTextPaint = new TextPaint(getThemedPaint(Theme.key_paint_chatActionText));
             nameTextPaint.setTextSize(AndroidUtilities.dp(12f));
+
+            bubblePaint.setColor(fragment.getThemedColor(Theme.key_actionBarDefaultSubmenuBackground));
 
             recyclerView = new RecyclerListView(getContext(), fragment.getResourceProvider()) {
 
@@ -141,7 +158,7 @@ public abstract class ChatQuickReply {
                 private final GestureDetector gestureDetector = new GestureDetector(getContext(), gestureListener);
 
                 {
-                    fillPaint.setColor(Theme.getColor(Theme.key_actionBarDefaultSubmenuBackground, resourcesProvider));
+                    fillPaint.setColor(fragment.getThemedColor(Theme.key_actionBarDefaultSubmenuBackground));
                 }
 
                 @Override
@@ -177,7 +194,6 @@ public abstract class ChatQuickReply {
                 protected void dispatchDraw(Canvas canvas) {
                     canvas.save();
                     canvas.clipPath(clipPath, Region.Op.INTERSECT);
-                    canvas.drawRect(clipRect, fillPaint);
                     super.dispatchDraw(canvas);
                     canvas.restore();
                 }
@@ -215,10 +231,17 @@ public abstract class ChatQuickReply {
         }
 
         @Override
+        protected void dispatchDraw(@NonNull Canvas canvas) {
+            shadowDrawable.setBounds((int) bubbleRect.left - SHADOW_SPACE, (int) bubbleRect.top - SHADOW_SPACE, (int) bubbleRect.right + SHADOW_SPACE, (int) bubbleRect.bottom + SHADOW_SPACE);
+            shadowDrawable.draw(canvas);
+            canvas.drawPath(bubblePath, bubblePaint);
+            super.dispatchDraw(canvas);
+        }
+
+        @Override
         protected void onDraw(@NonNull Canvas canvas) {
             super.onDraw(canvas);
             float topOffset = isListAboveReplyButton ? 0f : (listToButtonHeight - listToNameHeight);
-
             for (int i = 0; i < nameStateList.size(); ++i) {
                 StaticLayout staticLayout = nameStateList.get(i).staticLayout;
                 int alpha = Math.round(255 * nameStateList.get(i).currentProgress);
@@ -260,8 +283,132 @@ public abstract class ChatQuickReply {
         }
 
         public int getContentWidth(int itemCount) {
-            return ReplyViewGroup.SHADOW_SPACE * 2 + ReplyViewGroup.DECORATION_BOUND_SPACE * 2 +
+            return ReplyViewGroup.SHADOW_SPACE * 2 + ReplyViewGroup.DECORATION_BOUND_SPACE * 3 +
                     Adapter.ViewHolder.IMAGE_LAYOUT_WIDTH * itemCount;
+        }
+
+        public void openAnimation(@NonNull RectF srcRect) {
+            if (getParent() != null) {
+                ViewGroup parentViewGroup = (ViewGroup) getParent();
+                prevClipChildren = parentViewGroup.getClipChildren();
+                parentViewGroup.setClipChildren(false);
+            }
+
+            recyclerView.setPivotX(0f);
+            for (int i = 0; i < recyclerView.getChildCount(); ++i) {
+                recyclerView.getChildAt(i).setScaleX(0f);
+                recyclerView.getChildAt(i).setScaleY(0f);
+            }
+            Interpolator widthInterpolator = getBezierCosInterpolator(0.4f, 0.0f, 0.1f, 1.3f, 0.7f, 1.0f, 0.6f, 0.5f, 0.01f, 1.0f);
+            Interpolator heightInterpolator = getBezierCosInterpolator(0.33f, 0.0f, 0.15f, 1.3f, 0.4f, 1.0f, 1.2f, 0.5f, 0.03f, 1.0f);
+            Interpolator topInterpolator = getBezierCosInterpolator(0.33f, 0.0f, 0.15f, 1.3f, 0.4f, 1.0f, 1.2f, 0.5f, 0.03f, 1.0f);
+
+            final float circleRadius = ChatMessageCell.SIDE_BUTTON_SIZE * 0.5f;
+            ValueAnimator bubbleAnimator = ValueAnimator.ofFloat(0f, 1f);
+            bubbleAnimator.addUpdateListener(animation -> {
+                float progress = (float) animation.getAnimatedValue();
+                float bubbleHeight = AndroidUtilities.lerp(srcRect.height(), recyclerView.getHeight(), heightInterpolator.getInterpolation(progress));
+                float bubbleWidth = AndroidUtilities.lerp(srcRect.width(), recyclerView.getWidth(), widthInterpolator.getInterpolation(progress));
+                float bubbleLeft = AndroidUtilities.lerp(srcRect.left, recyclerView.getLeft(), widthInterpolator.getInterpolation(progress));
+                float bubbleTop = AndroidUtilities.lerp(srcRect.top, recyclerView.getTop(), topInterpolator.getInterpolation(progress));
+                bubbleRect.set(bubbleLeft, bubbleTop, bubbleLeft + bubbleWidth, bubbleTop + bubbleHeight);
+
+                float recyclerViewScale = bubbleWidth / recyclerView.getMeasuredWidth();
+                recyclerView.setScaleX(recyclerViewScale);
+                recyclerView.setScaleY(recyclerViewScale);
+                recyclerView.setTranslationX(bubbleLeft);
+                recyclerView.setTranslationY(bubbleTop - recyclerView.getTop() + (bubbleRect.height() - recyclerView.getHeight() * recyclerViewScale) / 2);
+
+                bubblePath.reset();
+                bubblePath.addRoundRect(bubbleRect, bubbleRect.height() * 0.5f, bubbleRect.height() * 0.5f, Path.Direction.CW);
+                float circleVerticalOffset = (float) Math.min(0, Math.pow(Math.abs(4 * (progress - 0.25f)), 2) - 1f) * circleRadius;
+                if (!isListAboveReplyButton) {
+                    circleVerticalOffset *= -1;
+                }
+                float yCircleCenter = srcRect.centerY() + circleVerticalOffset;
+                bubblePath.addCircle(srcRect.centerX(), yCircleCenter, circleRadius, Path.Direction.CW);
+
+                bubblePath.close();
+                invalidate();
+            });
+            bubbleAnimator.addListener(new AnimatorListenerAdapter() {
+                @Override
+                public void onAnimationStart(Animator animation) {
+                    super.onAnimationStart(animation);
+                    setVisibility(VISIBLE);
+                }
+            });
+            bubbleAnimator.setDuration(750);
+            bubbleAnimator.setInterpolator(new LinearInterpolator());
+
+            openAnimator = new AnimatorSet();
+            openAnimator.play(bubbleAnimator);
+
+            int startDelay = 100;
+            int childCount = Math.min(5, recyclerView.getChildCount());
+            for (int i = childCount / 2; i >= 0; --i) {
+                final int index = i;
+                ValueAnimator childScaleAnimator = ValueAnimator.ofFloat(1.0f);
+                childScaleAnimator.addUpdateListener(animation -> {
+                    float scale = (float) animation.getAnimatedValue();
+                    recyclerView.getChildAt(index).setScaleX(scale);
+                    recyclerView.getChildAt(index).setScaleY(scale);
+                    if (index != childCount - index - 1) {
+                        recyclerView.getChildAt(childCount - index - 1).setScaleX(scale);
+                        recyclerView.getChildAt(childCount - index - 1).setScaleY(scale);
+                    }
+                });
+                childScaleAnimator.setDuration((long)(bubbleAnimator.getDuration() * 0.5f));
+                childScaleAnimator.setInterpolator(widthInterpolator);
+                childScaleAnimator.setStartDelay(startDelay);
+                startDelay += 80;
+                openAnimator.play(childScaleAnimator);
+            }
+
+            openAnimator.start();
+        }
+
+        private void animateClose() {
+            if (openAnimator != null) {
+                openAnimator.cancel();
+            }
+            animate().alpha(0.0f).scaleX(0.8f).scaleY(0.8f).setDuration(125)
+                    .setListener(new AnimatorListenerAdapter() {
+                        @Override
+                        public void onAnimationEnd(Animator animation) {
+                            super.onAnimationEnd(animation);
+                            if (getParent() != null) {
+                                ViewGroup parentViewGroup = (ViewGroup) getParent();
+                                parentViewGroup.removeView(ReplyViewGroup.this);
+                                parentViewGroup.setClipChildren(prevClipChildren);
+                            }
+                            if (delegate != null) {
+                                delegate.onClose();
+                            }
+                        }
+                    })
+                    .start();
+        }
+
+        private Interpolator getBezierCosInterpolator(
+                float cbStartX, float cbStartY, float cbEndX, float cbEndY, float bezierMaxInput, float bezierFactor,
+                float cosA, float cosB, float cosC, float cosD
+        ) {
+            return new Interpolator() {
+
+                private final CubicBezierInterpolator bezier = new CubicBezierInterpolator(cbStartX, cbStartY, cbEndX, cbEndY);
+
+                @Override
+                public float getInterpolation(float input) {
+                    if (input < 0.0f) {
+                        return 0.0f;
+                    } else if (input <= bezierMaxInput) {
+                        return (1f - bezierFactor) + bezier.getInterpolation(input / bezierMaxInput) * bezierFactor;
+                    } else {
+                        return Math.min(1.0f, (float) (Math.cos(input * 2 * Math.PI / cosA + cosB) * cosC + cosD));
+                    }
+                }
+            };
         }
 
         private void onListChildSelected(int position) {
@@ -269,8 +416,8 @@ public abstract class ChatQuickReply {
                 return;
             }
 
-            if (animator != null) {
-                animator.cancel();
+            if (dialogSelectedAnimator != null) {
+                dialogSelectedAnimator.cancel();
             }
 
             selectedChildViewPosition = position;
@@ -325,8 +472,8 @@ public abstract class ChatQuickReply {
                 }
             }
 
-            animator = ValueAnimator.ofFloat(0f, 1f);
-            animator.addUpdateListener(animation -> {
+            dialogSelectedAnimator = ValueAnimator.ofFloat(0f, 1f);
+            dialogSelectedAnimator.addUpdateListener(animation -> {
                 float progress = (float) animation.getAnimatedValue();
                 for (int i = 0; i < viewStates.length; ++i) {
                     viewStates[i].apply(progress);
@@ -336,7 +483,7 @@ public abstract class ChatQuickReply {
                 }
                 invalidate();
             });
-            animator.addListener(new AnimatorListenerAdapter() {
+            dialogSelectedAnimator.addListener(new AnimatorListenerAdapter() {
                 @Override
                 public void onAnimationEnd(Animator animation) {
                     super.onAnimationEnd(animation);
@@ -350,9 +497,9 @@ public abstract class ChatQuickReply {
                     }
                 }
             });
-            animator.setDuration(150L);
-            animator.setInterpolator(CubicBezierInterpolator.EASE_OUT);
-            animator.start();
+            dialogSelectedAnimator.setDuration(150L);
+            dialogSelectedAnimator.setInterpolator(CubicBezierInterpolator.EASE_OUT);
+            dialogSelectedAnimator.start();
         }
 
         public void passTouchEvent(MotionEvent ev) {
@@ -370,24 +517,6 @@ public abstract class ChatQuickReply {
             MotionEvent newEvent = MotionEvent.obtain(ev);
             newEvent.offsetLocation(-recyclerView.getLeft(), -recyclerView.getTop());
             recyclerView.onTouchEvent(newEvent);
-        }
-
-        private void animateClose() {
-            animate().alpha(0.0f).scaleX(0.8f).scaleY(0.8f).setDuration(125)
-                    .setListener(new AnimatorListenerAdapter() {
-                        @Override
-                        public void onAnimationEnd(Animator animation) {
-                            super.onAnimationEnd(animation);
-                            ViewParent parent = getParent();
-                            if (parent != null) {
-                                ((ViewGroup) parent).removeView(ReplyViewGroup.this);
-                            }
-                            if (delegate != null) {
-                                delegate.onClose();
-                            }
-                        }
-                    })
-                    .start();
         }
 
         private void shareToDialog(View view) {
