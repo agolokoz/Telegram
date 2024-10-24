@@ -16,6 +16,7 @@ import android.widget.*;
 
 import androidx.annotation.*;
 import androidx.core.content.*;
+import androidx.core.math.MathUtils;
 import androidx.recyclerview.widget.*;
 
 import com.google.zxing.common.detector.*;
@@ -234,6 +235,7 @@ public abstract class ChatQuickReply {
         protected void dispatchDraw(@NonNull Canvas canvas) {
             shadowDrawable.setBounds((int) bubbleRect.left - SHADOW_SPACE, (int) bubbleRect.top - SHADOW_SPACE, (int) bubbleRect.right + SHADOW_SPACE, (int) bubbleRect.bottom + SHADOW_SPACE);
             shadowDrawable.draw(canvas);
+            shadowDrawable.setAlpha(bubblePaint.getAlpha());
             canvas.drawPath(bubblePath, bubblePaint);
             super.dispatchDraw(canvas);
         }
@@ -321,14 +323,10 @@ public abstract class ChatQuickReply {
 
                 bubblePath.reset();
                 bubblePath.addRoundRect(bubbleRect, bubbleRect.height() * 0.5f, bubbleRect.height() * 0.5f, Path.Direction.CW);
-                float circleVerticalOffset = (float) Math.min(0, Math.pow(Math.abs(4 * (progress - 0.25f)), 2) - 1f) * circleRadius;
-                if (!isListAboveReplyButton) {
-                    circleVerticalOffset *= -1;
-                }
-                float yCircleCenter = srcRect.centerY() + circleVerticalOffset;
-                bubblePath.addCircle(srcRect.centerX(), yCircleCenter, circleRadius, Path.Direction.CW);
-
+                bubblePath.addCircle(srcRect.centerX(), srcRect.centerY(), circleRadius, Path.Direction.CW);
                 bubblePath.close();
+
+                bubblePaint.setAlpha(Math.round(255 * MathUtils.clamp(progress * 10f, 0f, 1f)));
                 invalidate();
             });
             bubbleAnimator.addListener(new AnimatorListenerAdapter() {
@@ -338,7 +336,7 @@ public abstract class ChatQuickReply {
                     setVisibility(VISIBLE);
                 }
             });
-            bubbleAnimator.setDuration(750);
+            bubbleAnimator.setDuration(7500);
             bubbleAnimator.setInterpolator(new LinearInterpolator());
 
             openAnimator = new AnimatorSet();
