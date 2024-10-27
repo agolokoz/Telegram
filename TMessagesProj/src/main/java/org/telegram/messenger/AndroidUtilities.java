@@ -38,6 +38,7 @@ import android.graphics.Color;
 import android.graphics.ColorMatrix;
 import android.graphics.Matrix;
 import android.graphics.Point;
+import android.graphics.PointF;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.Typeface;
@@ -6265,4 +6266,13 @@ public class AndroidUtilities {
         }
     }
 
+    // y = kx + b
+    public static boolean fillLinesIntersection(double kLine1, double bLine1, double kLine2, double bLine2, PointF point) {
+        if (Double.compare(kLine1, kLine2) == 0) {
+            return false;
+        }
+        point.x = (float) ((bLine2 - bLine1) / (kLine1 - kLine2));
+        point.y = (float) (kLine1 * point.x + bLine1);
+        return true;
+    }
 }

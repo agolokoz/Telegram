@@ -17911,13 +17911,13 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
         if (drawSideButton != 3) {
             return;
         }
-        int height = SIDE_BUTTON_SIZE;
+        int height = AndroidUtilities.dp(32);
         if (commentLayout != null) {
             sideStartY -= AndroidUtilities.dp(18);
             height += AndroidUtilities.dp(18);
         }
 
-        rect.set(sideStartX, sideStartY, sideStartX + SIDE_BUTTON_SIZE, sideStartY + height);
+        rect.set(sideStartX, sideStartY, sideStartX + AndroidUtilities.dp(32), sideStartY + height);
         applyServiceShaderMatrix();
         if (alpha != 1f) {
             int oldAlpha = getThemedPaint(Theme.key_paint_chatActionBackground).getAlpha();
@@ -18419,7 +18419,7 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
                         sideButtonPathCorners2 = new float[8];
                         sideButtonPathCorners2[4] = sideButtonPathCorners2[5] = sideButtonPathCorners2[6] = sideButtonPathCorners2[7] = dp(16);
                     }
-                    AndroidUtilities.rectTmp.set(sideStartX, sideStartY, sideStartX + AndroidUtilities.dp(32), sideStartY + AndroidUtilities.dp(32));
+                    AndroidUtilities.rectTmp.set(sideStartX, sideStartY, sideStartX + SIDE_BUTTON_SIZE, sideStartY + SIDE_BUTTON_SIZE);
                     sideButtonPath1.addRoundRect(AndroidUtilities.rectTmp, sideButtonPathCorners1, Path.Direction.CW);
 
                     AndroidUtilities.rectTmp.set(sideStartX, sideStartY + AndroidUtilities.dp(32), sideStartX + AndroidUtilities.dp(32), sideStartY + AndroidUtilities.dp(64));

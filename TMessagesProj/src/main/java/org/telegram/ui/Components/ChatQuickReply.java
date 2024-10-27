@@ -2,6 +2,9 @@ package org.telegram.ui.Components;
 
 import static org.telegram.ui.Components.LayoutHelper.WRAP_CONTENT;
 
+import static java.lang.Math.cos;
+import static java.lang.Math.sin;
+
 import android.animation.*;
 import android.annotation.*;
 import android.graphics.*;
@@ -16,10 +19,10 @@ import android.widget.*;
 
 import androidx.annotation.*;
 import androidx.core.content.*;
+import androidx.core.graphics.*;
 import androidx.core.math.MathUtils;
+import androidx.core.view.animation.*;
 import androidx.recyclerview.widget.*;
-
-import com.google.zxing.common.detector.*;
 
 import org.telegram.messenger.*;
 import org.telegram.tgnet.*;
@@ -98,10 +101,20 @@ public abstract class ChatQuickReply {
         private final TextPaint nameTextPaint;
         private final RecyclerListView recyclerView;
 
+        private final Drawable shadowDrawable = ContextCompat.getDrawable(getContext(), R.drawable.reactions_bubble_shadow);
         private final RectF bubbleRect = new RectF();
         private final Paint bubblePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Path bubblePath = new Path();
-        private final Drawable shadowDrawable = ContextCompat.getDrawable(getContext(), R.drawable.reactions_bubble_shadow);
+        private final Matrix bubbleGradientMatrix = new Matrix();
+
+        private final PointF startLeftRectPoint = new PointF();
+        private final PointF startRightRectPoint = new PointF();
+        private final PointF tanLeftInterRectPoint = new PointF();
+        private final PointF tanRightInterRectPoint = new PointF();
+        private float xLeftTangentStart = 0f;
+        private float yLeftTangentStart = 0f;
+        private float xRightTangentStart = 0f;
+        private float yRightTangentStart = 0f;
 
         @Nullable
         private Adapter adapter;
@@ -115,8 +128,10 @@ public abstract class ChatQuickReply {
         private ViewAnimationState[] viewStates;
         private boolean isListAboveReplyButton = true;
         private boolean isLongTapped = true;
-        private int selectedChildViewPosition = -1;
         private boolean prevClipChildren = false;
+        private int selectedChildViewPosition = -1;
+        private int prevWidth = 0;
+        private int prevHeight = 0;
 
         public ReplyViewGroup(@NonNull BaseFragment fragment) {
             super(fragment.getContext());
@@ -125,8 +140,6 @@ public abstract class ChatQuickReply {
             nameBackgroundPaint = getThemedPaint(Theme.key_paint_chatActionBackground);
             nameTextPaint = new TextPaint(getThemedPaint(Theme.key_paint_chatActionText));
             nameTextPaint.setTextSize(AndroidUtilities.dp(12f));
-
-            bubblePaint.setColor(fragment.getThemedColor(Theme.key_actionBarDefaultSubmenuBackground));
 
             recyclerView = new RecyclerListView(getContext(), fragment.getResourceProvider()) {
 
@@ -222,6 +235,9 @@ public abstract class ChatQuickReply {
 
         @Override
         protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
+            int width = right - left;
+            int height = bottom - top;
+
             int listTop;
             if (isListAboveReplyButton) {
                 listTop = listToNameHeight;
@@ -229,6 +245,22 @@ public abstract class ChatQuickReply {
                 listTop = listToButtonHeight;
             }
             recyclerView.layout(SHADOW_SPACE, listTop, SHADOW_SPACE + recyclerView.getMeasuredWidth(), listTop + recyclerView.getMeasuredHeight());
+
+            if (prevWidth != width || prevHeight != height) {
+                int backgroundColor = fragment.getThemedColor(Theme.key_actionBarDefaultSubmenuBackground);
+                int sideButtonColor = ColorUtils.setAlphaComponent(fragment.getThemedPaint(Theme.key_paint_chatActionBackground).getColor(), 127);
+                bubbleGradientMatrix.setTranslate(0f, recyclerView.getTop() + AndroidUtilities.dp(1));
+                int gradientHeight = height - recyclerView.getTop() + AndroidUtilities.dp(1);
+                float backgroundPart = (float) recyclerView.getHeight() / gradientHeight;
+                LinearGradient gradient = new LinearGradient(
+                        0f, 0f, 0f, gradientHeight,
+                        new int[] { backgroundColor, backgroundColor, sideButtonColor, sideButtonColor },
+                        new float[] { 0.0f, backgroundPart, backgroundPart + (listToButtonHeight - ChatMessageCell.SIDE_BUTTON_SIZE * 1.0f) / height,  1.0f }, Shader.TileMode.CLAMP
+                );
+                bubblePaint.setShader(gradient);
+                prevWidth = width;
+                prevHeight = height;
+            }
         }
 
         @Override
@@ -285,7 +317,7 @@ public abstract class ChatQuickReply {
         }
 
         public int getContentWidth(int itemCount) {
-            return ReplyViewGroup.SHADOW_SPACE * 2 + ReplyViewGroup.DECORATION_BOUND_SPACE * 3 +
+            return ReplyViewGroup.SHADOW_SPACE * 2 + ReplyViewGroup.DECORATION_BOUND_SPACE * 2 +
                     Adapter.ViewHolder.IMAGE_LAYOUT_WIDTH * itemCount;
         }
 
@@ -301,32 +333,149 @@ public abstract class ChatQuickReply {
                 recyclerView.getChildAt(i).setScaleX(0f);
                 recyclerView.getChildAt(i).setScaleY(0f);
             }
-            Interpolator widthInterpolator = getBezierCosInterpolator(0.4f, 0.0f, 0.1f, 1.3f, 0.7f, 1.0f, 0.6f, 0.5f, 0.01f, 1.0f);
-            Interpolator heightInterpolator = getBezierCosInterpolator(0.33f, 0.0f, 0.15f, 1.3f, 0.4f, 1.0f, 1.2f, 0.5f, 0.03f, 1.0f);
-            Interpolator topInterpolator = getBezierCosInterpolator(0.33f, 0.0f, 0.15f, 1.3f, 0.4f, 1.0f, 1.2f, 0.5f, 0.03f, 1.0f);
 
+            final Path widthInterpolatorPath = new Path();
+            widthInterpolatorPath.moveTo(0f, 0f);
+            widthInterpolatorPath.cubicTo(0.3f, 0.0f, 0.0f, 1.2f, 0.6f, 1.0f);
+            widthInterpolatorPath.quadTo(0.7f, 0.95f, 1.0f, 1.0f);
+            Interpolator sizeInterpolator = PathInterpolatorCompat.create(widthInterpolatorPath);
+
+            final Path topInterpolatorPath = new Path();
+            topInterpolatorPath.moveTo(0f, 0f);
+            topInterpolatorPath.cubicTo(0.2f, 0.2f, 0.0f, 1.2f, 0.4f, 1.0f);
+            topInterpolatorPath.quadTo(0.5f, 0.95f, 1.0f, 1.0f);
+            Interpolator topInterpolator = PathInterpolatorCompat.create(topInterpolatorPath);
+
+            Interpolator circleInterpolator = input -> {
+                if (input >= 0f && input < 0.4f) {
+                    float value = Math.abs((input - 0.2f) * 5f);
+                    value *= value;
+                    return 1 - value;
+                } else if (input < 0.7f) {
+                    float value = input - 0.55f;
+                    value *= value;
+                    return value * 6.66f - 0.15f;
+                }
+                return 0.0f;
+            };
+
+            final Path circlePath = new Path();
+            final Path leftConnectionPath = new Path();
+            final Path rightConnectionPath = new Path();
             final float circleRadius = ChatMessageCell.SIDE_BUTTON_SIZE * 0.5f;
             ValueAnimator bubbleAnimator = ValueAnimator.ofFloat(0f, 1f);
             bubbleAnimator.addUpdateListener(animation -> {
                 float progress = (float) animation.getAnimatedValue();
-                float bubbleHeight = AndroidUtilities.lerp(srcRect.height(), recyclerView.getHeight(), heightInterpolator.getInterpolation(progress));
-                float bubbleWidth = AndroidUtilities.lerp(srcRect.width(), recyclerView.getWidth(), widthInterpolator.getInterpolation(progress));
-                float bubbleLeft = AndroidUtilities.lerp(srcRect.left, recyclerView.getLeft(), widthInterpolator.getInterpolation(progress));
-                float bubbleTop = AndroidUtilities.lerp(srcRect.top, recyclerView.getTop(), topInterpolator.getInterpolation(progress));
-                bubbleRect.set(bubbleLeft, bubbleTop, bubbleLeft + bubbleWidth, bubbleTop + bubbleHeight);
+                bubblePath.rewind();
+                circlePath.rewind();
+                leftConnectionPath.rewind();
+                rightConnectionPath.rewind();
 
-                float recyclerViewScale = bubbleWidth / recyclerView.getMeasuredWidth();
+                // prepare rect
+                float sizeProgress = sizeInterpolator.getInterpolation(progress);
+                bubbleRect.top = AndroidUtilities.lerp(srcRect.top, recyclerView.getTop(), topInterpolator.getInterpolation(progress));
+                bubbleRect.left = AndroidUtilities.lerp(srcRect.left, recyclerView.getLeft(), sizeProgress);
+                bubbleRect.right = bubbleRect.left + AndroidUtilities.lerp(srcRect.width(), recyclerView.getWidth(), sizeProgress);
+                bubbleRect.bottom = bubbleRect.top + AndroidUtilities.lerp(srcRect.height(), recyclerView.getHeight(), sizeProgress);
+                float bubbleRectRadius = bubbleRect.height() * 0.5f;
+                bubblePath.addRoundRect(bubbleRect, bubbleRectRadius, bubbleRectRadius, Path.Direction.CW);
+
+                // prepare list
+                float recyclerViewScale = bubbleRect.width() / recyclerView.getMeasuredWidth();
                 recyclerView.setScaleX(recyclerViewScale);
                 recyclerView.setScaleY(recyclerViewScale);
-                recyclerView.setTranslationX(bubbleLeft);
-                recyclerView.setTranslationY(bubbleTop - recyclerView.getTop() + (bubbleRect.height() - recyclerView.getHeight() * recyclerViewScale) / 2);
+                recyclerView.setTranslationX(bubbleRect.left);
+                recyclerView.setTranslationY(bubbleRect.top - recyclerView.getTop() + (bubbleRect.height() - recyclerView.getHeight() * recyclerViewScale) / 2);
 
-                bubblePath.reset();
-                bubblePath.addRoundRect(bubbleRect, bubbleRect.height() * 0.5f, bubbleRect.height() * 0.5f, Path.Direction.CW);
-                bubblePath.addCircle(srcRect.centerX(), srcRect.centerY(), circleRadius, Path.Direction.CW);
+                // prepare gradient
+                bubbleGradientMatrix.setTranslate(0f, bubbleRect.top + AndroidUtilities.dp(1));
+                Shader shader = bubblePaint.getShader();
+                if (shader != null) {
+                    shader.setLocalMatrix(bubbleGradientMatrix);
+                }
+
+                // prepare side button
+                float circleVerticalOffset = -circleInterpolator.getInterpolation(progress) * circleRadius;
+                if (!isListAboveReplyButton) {
+                    circleVerticalOffset *= -1;
+                }
+                float yCircleCenter = srcRect.centerY() + circleVerticalOffset;
+                if (yCircleCenter + circleRadius > bubbleRect.bottom) {
+                    circlePath.addCircle(srcRect.centerX(), yCircleCenter, circleRadius, Path.Direction.CW);
+                }
+
+                float circleIntersectionHeight = yCircleCenter - bubbleRect.bottom;
+                if (bubbleRect.bottom < yCircleCenter + circleRadius) {
+                    float additionalAngleRad = (float) Math.toRadians(AndroidUtilities.lerpAngle(10, 30, MathUtils.clamp(circleIntersectionHeight / circleRadius, 0f, 1f)));
+                    float circleIntersectionWidth = circleIntersectionHeight >= yCircleCenter
+                            ? 0
+                            : (float) Math.sqrt(circleRadius * circleRadius - circleIntersectionHeight * circleIntersectionHeight);
+                    double leftAngleRad = Math.abs(circleIntersectionHeight) >= circleRadius
+                            ? Math.PI / 2
+                            : Math.atan2(circleIntersectionHeight, -circleIntersectionWidth);
+                    leftAngleRad += additionalAngleRad;
+                    xLeftTangentStart = srcRect.centerX() + (float) (circleRadius * cos(leftAngleRad));
+                    yLeftTangentStart = yCircleCenter - (float) (circleRadius * sin(leftAngleRad));
+                    float kLeft = -1 / ((yCircleCenter - yLeftTangentStart) / (xLeftTangentStart - srcRect.centerX()));
+
+                    double rightAngleRad = Math.abs(circleIntersectionHeight) >= circleRadius
+                            ? Math.PI / 2
+                            : Math.atan2(circleIntersectionHeight, circleIntersectionWidth);
+                    rightAngleRad -= additionalAngleRad;
+                    xRightTangentStart = srcRect.centerX() + (float) (circleRadius * cos(rightAngleRad));
+                    yRightTangentStart = yCircleCenter - (float) (circleRadius * sin(rightAngleRad));
+                    float kRight = -1 / ((yCircleCenter - yRightTangentStart) / (xRightTangentStart - srcRect.centerX()));
+
+                    if (AndroidUtilities.fillLinesIntersection(kLeft, 0, 0, yLeftTangentStart - bubbleRect.bottom, tanLeftInterRectPoint) &&
+                            AndroidUtilities.fillLinesIntersection(kRight, 0, 0, yRightTangentStart - bubbleRect.bottom, tanRightInterRectPoint) &&
+                            tanLeftInterRectPoint.x + xLeftTangentStart - (tanRightInterRectPoint.x + xRightTangentStart) <= AndroidUtilities.dp(10)
+                    ) {
+                        tanLeftInterRectPoint.x += xLeftTangentStart;
+                        tanLeftInterRectPoint.y = yLeftTangentStart - tanLeftInterRectPoint.y;
+                        float tanLeftLineSize = (float) Math.sqrt(Math.pow(tanLeftInterRectPoint.x - xLeftTangentStart, 2.0f) + Math.pow(tanLeftInterRectPoint.y - yLeftTangentStart, 2.0f));
+                        startLeftRectPoint.x = Math.max(bubbleRect.left, tanLeftInterRectPoint.x - tanLeftLineSize);
+                        startLeftRectPoint.y = tanLeftInterRectPoint.y;
+                        if (startLeftRectPoint.x < bubbleRect.left + bubbleRectRadius) {
+                            float xDist = bubbleRect.left + bubbleRectRadius - startLeftRectPoint.x;
+                            float yDist = (float) Math.sqrt(bubbleRectRadius * bubbleRectRadius - xDist * xDist);
+                            startLeftRectPoint.y = bubbleRect.centerY() + (Float.isNaN(yDist) ? 0 : yDist);
+                        }
+
+                        leftConnectionPath.moveTo(startLeftRectPoint.x, startLeftRectPoint.y);
+                        leftConnectionPath.lineTo(xLeftTangentStart, yLeftTangentStart);
+                        leftConnectionPath.lineTo(srcRect.centerX(), yLeftTangentStart);
+                        leftConnectionPath.lineTo(srcRect.centerX(), tanLeftInterRectPoint.y);
+                        leftConnectionPath.close();
+                        leftConnectionPath.moveTo(startLeftRectPoint.x, startLeftRectPoint.y);
+                        leftConnectionPath.quadTo(tanLeftInterRectPoint.x, tanLeftInterRectPoint.y, xLeftTangentStart, yLeftTangentStart);
+                        leftConnectionPath.close();
+
+                        tanRightInterRectPoint.x += xRightTangentStart;
+                        tanRightInterRectPoint.y = yRightTangentStart - tanRightInterRectPoint.y;
+                        float rightTangentLineSize = (float) Math.sqrt(Math.pow(tanRightInterRectPoint.x - xRightTangentStart, 2.0f) + Math.pow(tanRightInterRectPoint.y - yRightTangentStart, 2.0f));
+                        startRightRectPoint.x = Math.min(bubbleRect.right, tanRightInterRectPoint.x + rightTangentLineSize);
+                        startRightRectPoint.y = tanRightInterRectPoint.y;
+                        if (startRightRectPoint.x > bubbleRect.right - bubbleRectRadius) {
+                            float xDist = startRightRectPoint.x - (bubbleRect.right - bubbleRectRadius);
+                            float yDist = (float) Math.sqrt(bubbleRectRadius * bubbleRectRadius - xDist * xDist);
+                            startRightRectPoint.y = bubbleRect.centerY() + (Float.isNaN(yDist) ? 0 : yDist);
+                        }
+                        rightConnectionPath.moveTo(startRightRectPoint.x, startRightRectPoint.y);
+                        rightConnectionPath.lineTo(xRightTangentStart, yRightTangentStart);
+                        rightConnectionPath.lineTo(srcRect.centerX(), yRightTangentStart);
+                        rightConnectionPath.lineTo(srcRect.centerX(), tanRightInterRectPoint.y);
+                        rightConnectionPath.close();
+                        rightConnectionPath.moveTo(startRightRectPoint.x, startRightRectPoint.y);
+                        rightConnectionPath.quadTo(tanRightInterRectPoint.x, tanRightInterRectPoint.y, xRightTangentStart, yRightTangentStart);
+                        rightConnectionPath.close();
+                    }
+                }
+
+                bubblePath.op(leftConnectionPath, Path.Op.UNION);
+                bubblePath.op(rightConnectionPath, Path.Op.UNION);
+                bubblePath.op(circlePath, Path.Op.UNION);
                 bubblePath.close();
 
-                bubblePaint.setAlpha(Math.round(255 * MathUtils.clamp(progress * 10f, 0f, 1f)));
                 invalidate();
             });
             bubbleAnimator.addListener(new AnimatorListenerAdapter() {
@@ -336,7 +485,7 @@ public abstract class ChatQuickReply {
                     setVisibility(VISIBLE);
                 }
             });
-            bubbleAnimator.setDuration(7500);
+            bubbleAnimator.setDuration(750);
             bubbleAnimator.setInterpolator(new LinearInterpolator());
 
             openAnimator = new AnimatorSet();
@@ -357,9 +506,9 @@ public abstract class ChatQuickReply {
                     }
                 });
                 childScaleAnimator.setDuration((long)(bubbleAnimator.getDuration() * 0.5f));
-                childScaleAnimator.setInterpolator(widthInterpolator);
+                childScaleAnimator.setInterpolator(sizeInterpolator);
                 childScaleAnimator.setStartDelay(startDelay);
-                startDelay += 80;
+                startDelay += (int)(childScaleAnimator.getDuration() / 6);
                 openAnimator.play(childScaleAnimator);
             }
 
@@ -403,7 +552,7 @@ public abstract class ChatQuickReply {
                     } else if (input <= bezierMaxInput) {
                         return (1f - bezierFactor) + bezier.getInterpolation(input / bezierMaxInput) * bezierFactor;
                     } else {
-                        return Math.min(1.0f, (float) (Math.cos(input * 2 * Math.PI / cosA + cosB) * cosC + cosD));
+                        return Math.min(1.0f, (float) (cos(input * 2 * Math.PI / cosA + cosB) * cosC + cosD));
                     }
                 }
             };
