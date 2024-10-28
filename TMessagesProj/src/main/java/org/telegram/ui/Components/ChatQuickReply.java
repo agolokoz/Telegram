@@ -807,7 +807,7 @@ public abstract class ChatQuickReply {
         }
 
         public void passTouchEvent(MotionEvent ev) {
-            if (ev.getAction() == MotionEvent.ACTION_CANCEL) {
+            if (ev.getAction() == MotionEvent.ACTION_CANCEL || !isOpenAnimationFinished) {
                 return;
             }
             if (ev.getAction() == MotionEvent.ACTION_UP) {
