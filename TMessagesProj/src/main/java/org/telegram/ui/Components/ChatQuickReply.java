@@ -92,12 +92,15 @@ public abstract class ChatQuickReply {
         private static final int NAME_BG_HORIZONTAL_OFFSET = AndroidUtilities.dp(7);
         private static final int NAME_BG_TOP_OFFSET = AndroidUtilities.dp(4);
         private static final int NAME_BG_BOTTOM_OFFSET = AndroidUtilities.dp(3);
+        private static final float BLUR_DOWNSCALE = 8.0f;
 
         private final RectF bubbleRect = new RectF();
         private final RectF circleRect = new RectF();
         private final Path bubblePath = new Path();
         private final Matrix bubbleGradientMatrix = new Matrix();
         private final Paint bubblePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint blurredBitmapPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
+        private final Matrix blurredBitmapMatrix = new Matrix();
         private final Drawable shadowDrawable = ContextCompat.getDrawable(getContext(), R.drawable.reactions_bubble_shadow);
         private final List<NameState> nameStateList = new ArrayList<>();
         private final RectF textBackgroundRect = new RectF();
@@ -120,6 +123,8 @@ public abstract class ChatQuickReply {
         private AnimatorSet openAnimator;
         @Nullable
         private ViewAnimationState[] viewStates;
+        @Nullable
+        private Bitmap blurredBitmap;
         private boolean isListAboveReplyButton = true;
         private boolean isLongTapped = true;
         private boolean prevClipChildren = false;
@@ -129,15 +134,18 @@ public abstract class ChatQuickReply {
         private int prevDrawSideButton = 0;
         private float circleRotationDegrees = 0;
         private boolean isOpenAnimationFinished = false;
+        private boolean isDrawToBitmapCanvas = false;
 
         public ReplyViewGroup(@NonNull ChatActivity fragment, @NonNull ChatMessageCell cell) {
             super(fragment.getContext());
             this.fragment = fragment;
             this.cell = cell;
             setWillNotDraw(false);
-            nameBackgroundPaint = getThemedPaint(Theme.key_paint_chatActionBackground);
+
+            nameBackgroundPaint = new Paint(getThemedPaint(Theme.key_paint_chatActionBackground));
             nameTextPaint = new TextPaint(getThemedPaint(Theme.key_paint_chatActionText));
             nameTextPaint.setTextSize(AndroidUtilities.dp(12f));
+            blurredBitmapMatrix.setScale(BLUR_DOWNSCALE, BLUR_DOWNSCALE);
 
             recyclerView = new RecyclerListView(getContext(), fragment.getResourceProvider()) {
 
@@ -284,6 +292,11 @@ public abstract class ChatQuickReply {
 
         @Override
         protected void dispatchDraw(@NonNull Canvas canvas) {
+            if (!isDrawToBitmapCanvas && blurredBitmap != null) {
+                canvas.drawBitmap(blurredBitmap, blurredBitmapMatrix, blurredBitmapPaint);
+                return;
+            }
+
             shadowDrawable.setBounds((int) bubbleRect.left - SHADOW_SPACE, (int) bubbleRect.top - SHADOW_SPACE, (int) bubbleRect.right + SHADOW_SPACE, (int) bubbleRect.bottom + SHADOW_SPACE);
             shadowDrawable.setAlpha(bubblePaint.getAlpha());
             shadowDrawable.draw(canvas);
@@ -626,6 +639,72 @@ public abstract class ChatQuickReply {
             openAnimator.start();
         }
 
+        private void closeAnimation(@Nullable View view) {
+            if (openAnimator != null) {
+                openAnimator.cancel();
+            }
+
+            ValueAnimator closeAnimator = ValueAnimator.ofFloat(1f, 0f);
+            closeAnimator.addUpdateListener(animation -> {
+                float progress = (float) animation.getAnimatedValue();
+                recyclerView.setAlpha(progress);
+                int paintAlpha = Math.round(255 * progress);
+                bubblePaint.setAlpha(paintAlpha);
+                nameBackgroundPaint.setAlpha(paintAlpha);
+                blurredBitmapPaint.setAlpha(paintAlpha);
+                invalidate();
+            });
+            closeAnimator.addListener(new AnimatorListenerAdapter() {
+
+                @Override
+                public void onAnimationStart(Animator animation) {
+                    super.onAnimationStart(animation);
+                    setCellSideButtonVisible(true);
+                }
+
+                @Override
+                public void onAnimationEnd(Animator animation) {
+                    super.onAnimationEnd(animation);
+                    if (getParent() != null) {
+                        ViewGroup parentViewGroup = (ViewGroup) getParent();
+                        parentViewGroup.removeView(ReplyViewGroup.this);
+                        parentViewGroup.setClipChildren(prevClipChildren);
+                    }
+                    if (delegate != null) {
+                        delegate.onClose();
+                    }
+                    if (blurredBitmap != null) {
+                        blurredBitmap.recycle();
+                    }
+                    blurredBitmap = null;
+                }
+            });
+            closeAnimator.setDuration(200);
+            closeAnimator.start();
+
+            int savedViewVisibility = View.VISIBLE;
+            if (view != null) {
+                savedViewVisibility = view.getVisibility();
+                view.setVisibility(View.GONE);
+            }
+            int maxBlurRadius = 12;
+            int bitmapWidth = (int) (getWidth() / BLUR_DOWNSCALE) + maxBlurRadius * 2;
+            int bitmapHeight = (int) (getHeight() / BLUR_DOWNSCALE) + maxBlurRadius * 2;
+            blurredBitmap = Bitmap.createBitmap(bitmapWidth, bitmapHeight, Bitmap.Config.ARGB_8888);
+            Canvas blurredCanvas = new Canvas(blurredBitmap);
+            blurredCanvas.scale(1f / BLUR_DOWNSCALE, 1f / BLUR_DOWNSCALE);
+            isDrawToBitmapCanvas = true;
+            draw(blurredCanvas);
+            isDrawToBitmapCanvas = false;
+            if (view != null) {
+                view.setVisibility(savedViewVisibility);
+            }
+            Utilities.themeQueue.postRunnable(() -> {
+                Utilities.stackBlurBitmap(blurredBitmap, 2);
+                AndroidUtilities.runOnUIThread(closeAnimator::start);
+            });
+        }
+
         private void setCellSideButtonVisible(boolean isVisible) {
             if (isVisible) {
                 cell.drawSideButton = prevDrawSideButton;
@@ -634,35 +713,6 @@ public abstract class ChatQuickReply {
                 cell.drawSideButton = 0;
             }
             fragment.getChatListView().invalidate();
-        }
-
-        private void animateClose() {
-            if (openAnimator != null) {
-                openAnimator.cancel();
-            }
-            animate().alpha(0.0f).scaleX(0.8f).scaleY(0.8f).setDuration(125)
-                    .setListener(new AnimatorListenerAdapter() {
-
-                        @Override
-                        public void onAnimationStart(Animator animation) {
-                            super.onAnimationStart(animation);
-                            setCellSideButtonVisible(true);
-                        }
-
-                        @Override
-                        public void onAnimationEnd(Animator animation) {
-                            super.onAnimationEnd(animation);
-                            if (getParent() != null) {
-                                ViewGroup parentViewGroup = (ViewGroup) getParent();
-                                parentViewGroup.removeView(ReplyViewGroup.this);
-                                parentViewGroup.setClipChildren(prevClipChildren);
-                            }
-                            if (delegate != null) {
-                                delegate.onClose();
-                            }
-                        }
-                    })
-                    .start();
         }
 
         private void onListChildSelected(int position) {
@@ -761,9 +811,10 @@ public abstract class ChatQuickReply {
                 return;
             }
             if (ev.getAction() == MotionEvent.ACTION_UP) {
-                shareToDialog(recyclerView.getChildAt(selectedChildViewPosition));
+                View view = recyclerView.getChildAt(selectedChildViewPosition);
+                closeAnimation(view);
+                shareToDialog(view);
                 isLongTapped = false;
-                animateClose();
                 return;
             } else {
                 isLongTapped = true;
