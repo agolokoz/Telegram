@@ -217,6 +217,8 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
     private final static int UPLOADING_ALLOWABLE_ERROR = 1024 * 1024;
     private final static int STICKER_STATUS_OFFSET = 6;
 
+    public static final int SIDE_BUTTON_SIZE = AndroidUtilities.dp(32);
+
     public boolean clipToGroupBounds;
     public boolean drawForBlur;
     private boolean flipImage;
@@ -558,6 +560,10 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
         }
 
         default void didPressSideButton(ChatMessageCell cell) {
+        }
+
+        default boolean didLongPressSideButton(ChatMessageCell cell) {
+            return false;
         }
 
         default void didPressOther(ChatMessageCell cell, float otherX, float otherY) {
@@ -1372,7 +1378,7 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
     private boolean drawTopic;
     private MessageTopicButton topicButton;
 
-    private int drawSideButton;
+    public int drawSideButton;
     private boolean sideButtonVisible;
     private int drawSideButton2;
     private boolean sideButtonPressed;
@@ -1381,8 +1387,8 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
     private float[] sideButtonPathCorners1, sideButtonPathCorners2;
     private static final int SIDE_BUTTON_SPONSORED_CLOSE = 4;
     private static final int SIDE_BUTTON_SPONSORED_MORE = 5;
-    private float sideStartX;
-    private float sideStartY;
+    public float sideStartX;
+    public float sideStartY;
 
     private StaticLayout nameLayout;
     private int nameLayoutWidth;
@@ -1578,6 +1584,7 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
     private Theme.ResourcesProvider resourcesProvider;
     private final boolean canDrawBackgroundInParent;
     private ChatMessageSharedResources sharedResources;
+    private View.OnTouchListener touchDelegate;
 
     // Public for enter transition
     public List<SpoilerEffect> replySpoilers = new ArrayList<>();
@@ -3887,6 +3894,12 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
+        if (touchDelegate != null) {
+            if (touchDelegate.onTouch(this, event)) {
+                return true;
+            }
+        }
+
         if (currentMessageObject == null || delegate != null && !delegate.canPerformActions() || animationRunning) {
             if (currentMessageObject != null && currentMessageObject.preview) {
                 return checkTextSelection(event);
@@ -10057,6 +10070,7 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
         }
 
         linkPreviewPressed = false;
+        boolean prevSideButtonPressed = sideButtonPressed;
         sideButtonPressed = false;
         pressedSideButton = 0;
         imagePressed = false;
@@ -10110,6 +10124,8 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
                     }
                     handled = delegate.didLongPressChannelAvatar(this, currentChat, id, lastTouchX, lastTouchY);
                 }
+            } else if (prevSideButtonPressed) {
+                handled = delegate.didLongPressSideButton(this);
             }
 
             if (!handled) {
@@ -18403,7 +18419,7 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
                         sideButtonPathCorners2 = new float[8];
                         sideButtonPathCorners2[4] = sideButtonPathCorners2[5] = sideButtonPathCorners2[6] = sideButtonPathCorners2[7] = dp(16);
                     }
-                    AndroidUtilities.rectTmp.set(sideStartX, sideStartY, sideStartX + AndroidUtilities.dp(32), sideStartY + AndroidUtilities.dp(32));
+                    AndroidUtilities.rectTmp.set(sideStartX, sideStartY, sideStartX + SIDE_BUTTON_SIZE, sideStartY + SIDE_BUTTON_SIZE);
                     sideButtonPath1.addRoundRect(AndroidUtilities.rectTmp, sideButtonPathCorners1, Path.Direction.CW);
 
                     AndroidUtilities.rectTmp.set(sideStartX, sideStartY + AndroidUtilities.dp(32), sideStartX + AndroidUtilities.dp(32), sideStartY + AndroidUtilities.dp(64));
@@ -24837,5 +24853,9 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
             return lerp(transitionParams.animateFromWidthForButton, widthForButtons, transitionParams.animateChangeProgress);
         }
         return widthForButtons;
+    }
+
+    public void setOnTouchDelegate(@Nullable View.OnTouchListener delegate) {
+        touchDelegate = delegate;
     }
 }

@@ -925,7 +925,8 @@ public class Bulletin {
 
         public static class DefaultTransition implements Transition {
 
-            long duration = 255;
+            public static final int DefaultDuration = 255;
+            long duration = DefaultDuration;
 
             @Override
             public void animateEnter(@NonNull Layout layout, @Nullable Runnable startAction, @Nullable Runnable endAction, @Nullable Consumer<Float> onUpdate, int bottomOffset) {
@@ -1569,6 +1570,7 @@ public class Bulletin {
 
         public RLottieImageView imageView;
         public TextView textView;
+        public boolean isAutoPlay = true;
 
         private int textColor;
 
@@ -1617,7 +1619,9 @@ public class Bulletin {
         @Override
         protected void onShow() {
             super.onShow();
-            imageView.playAnimation();
+            if (isAutoPlay) {
+                imageView.playAnimation();
+            }
         }
 
         public void setAnimation(int resId, String... layers) {

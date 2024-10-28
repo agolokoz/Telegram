@@ -78,7 +78,6 @@ import android.text.style.ClickableSpan;
 import android.text.style.ForegroundColorSpan;
 import android.text.style.ImageSpan;
 import android.text.style.URLSpan;
-import android.util.Log;
 import android.util.Pair;
 import android.util.Property;
 import android.util.SparseArray;
@@ -267,7 +266,6 @@ import java.io.FileOutputStream;
 import java.io.FileWriter;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.net.IDN;
 import java.net.URLDecoder;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -344,6 +342,7 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
     private ClippingImageView animatingImageView;
     private ThanosEffect chatListThanosEffect;
     private RecyclerListView chatListView;
+    private View.OnTouchListener chatListViewTouchInterceptor;
     private ChatListItemAnimator chatListItemAnimator;
     private GridLayoutManagerFixed chatLayoutManager;
     private ChatActivityAdapter chatAdapter;
@@ -4519,6 +4518,11 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
 
             @Override
             public boolean onTouchEvent(MotionEvent e) {
+                if (chatListViewTouchInterceptor != null) {
+                    if (chatListViewTouchInterceptor.onTouch(this, e)) {
+                        return true;
+                    }
+                }
                 textSelectionHelper.checkSelectionCancel(e);
                 if (e.getAction() == MotionEvent.ACTION_DOWN) {
                     scrollByTouch = true;
@@ -33292,7 +33296,7 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
         if (chatMode == MODE_QUICK_REPLIES && (messages.isEmpty() || threadMessageId == 0)) {
             return false;
         }
-        return swipeBackEnabled && chatActivityEnterView.swipeToBackEnabled() && pullingDownOffset == 0;
+        return chatListViewTouchInterceptor == null && swipeBackEnabled && chatActivityEnterView.swipeToBackEnabled() && pullingDownOffset == 0;
     }
 
     @Override
@@ -33300,7 +33304,7 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
         if (chatMode == MODE_QUICK_REPLIES && (messages.isEmpty() || threadMessageId == 0)) {
             return false;
         }
-        return swipeBackEnabled && (forwardingPreviewView == null || !forwardingPreviewView.isShowing());
+        return chatListViewTouchInterceptor == null && swipeBackEnabled && (forwardingPreviewView == null || !forwardingPreviewView.isShowing());
     }
 
     public class ChatActivityAdapter extends RecyclerAnimationScrollHelper.AnimatableAdapter {
@@ -35347,6 +35351,34 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
                 AndroidUtilities.setAdjustResizeToNothing(getParentActivity(), classGuid);
                 fragmentView.requestLayout();
             }
+        }
+
+        @SuppressLint("ClickableViewAccessibility")
+        @Override
+        public boolean didLongPressSideButton(ChatMessageCell cell) {
+            ChatQuickReply.Delegate delegate = new ChatQuickReply.Delegate() {
+                @Override
+                public void onClose() {
+                    cell.setOnTouchDelegate(null);
+                    chatListViewTouchInterceptor = null;
+                }
+            };
+            final ChatQuickReply.ReplyViewGroup viewGroup = ChatQuickReply.show(ChatActivity.this, cell, delegate);
+            cell.setOnTouchDelegate((v, event) -> {
+                viewGroup.passTouchEvent(event);
+                return true;
+            });
+
+            int[] viewGroupLocation = new int[2];
+            chatListViewTouchInterceptor = (v, event) -> {
+                viewGroup.getLocationOnScreen(viewGroupLocation);
+                MotionEvent newEvent = MotionEvent.obtain(event);
+                newEvent.offsetLocation(-viewGroupLocation[0] + chatListView.getLeft(), -viewGroupLocation[1] + chatListView.getTop());
+                viewGroup.passTouchEvent(newEvent);
+                return true;
+            };
+
+            return true;
         }
 
         @Override
