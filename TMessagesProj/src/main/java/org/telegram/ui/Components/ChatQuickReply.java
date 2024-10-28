@@ -831,6 +831,10 @@ public abstract class ChatQuickReply {
                 return;
             }
 
+            ArrayList<MessageObject> array = new ArrayList<>();
+            array.add(cell.getMessageObject());
+            SendMessagesHelper.getInstance(UserConfig.selectedAccount).sendMessage(array, dialog.id, true, false, true, 0);
+
             Bulletin bulletin = BulletinFactory.createForwardedBulletin(fragment.getContext(), fragment.getLayoutContainer(), 1, dialog.id, 1, fragment.getThemedColor(Theme.key_undo_background), fragment.getThemedColor(Theme.key_undo_infoColor));
             Bulletin.Layout bulletinLayout = bulletin.getLayout();
             if (bulletinLayout instanceof Bulletin.LottieLayout) {
@@ -1082,7 +1086,7 @@ public abstract class ChatQuickReply {
         public void fetchDialogs() {
             int currentAccount = UserConfig.selectedAccount;
             long selfUserId = UserConfig.getInstance(currentAccount).clientUserId;
-            ArrayList<TLRPC.Dialog> allDialogs = MessagesController.getInstance(currentAccount).getAllDialogs();
+            ArrayList<TLRPC.Dialog> allDialogs = new ArrayList<>(MessagesController.getInstance(currentAccount).getAllDialogs());
             ArrayList<TLRPC.Dialog> archivedDialogs = new ArrayList<>();
             TLRPC.Dialog selfDialog = null;
 
