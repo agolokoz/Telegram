@@ -43,7 +43,7 @@ public abstract class ChatQuickReply {
     public static ReplyViewGroup show(@NonNull ChatActivity chatActivity, @NonNull ChatMessageCell cell, @NonNull Delegate delegate) {
         int rootHorizontalSpace = AndroidUtilities.dp(3);
 
-        ReplyViewGroup rootLayout = new ReplyViewGroup(chatActivity);
+        ReplyViewGroup rootLayout = new ReplyViewGroup(chatActivity, cell);
         rootLayout.setAdapter(new Adapter());
         rootLayout.setDelegate(delegate);
         rootLayout.setClipChildren(false);
@@ -92,29 +92,22 @@ public abstract class ChatQuickReply {
         private static final int NAME_BG_TOP_OFFSET = AndroidUtilities.dp(4);
         private static final int NAME_BG_BOTTOM_OFFSET = AndroidUtilities.dp(3);
 
-        private final int listToButtonHeight = AndroidUtilities.dp(42);
-        private final int listToNameHeight = AndroidUtilities.dp(30);
+        private final RectF bubbleRect = new RectF();
+        private final RectF circleRect = new RectF();
+        private final Path bubblePath = new Path();
+        private final Matrix bubbleGradientMatrix = new Matrix();
+        private final Paint bubblePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Drawable shadowDrawable = ContextCompat.getDrawable(getContext(), R.drawable.reactions_bubble_shadow);
         private final List<NameState> nameStateList = new ArrayList<>();
         private final RectF textBackgroundRect = new RectF();
-        private final BaseFragment fragment;
+        private final int listToButtonHeight = AndroidUtilities.dp(42);
+        private final int listToNameHeight = AndroidUtilities.dp(30);
+        private final ChatActivity fragment;
+        private final ChatMessageCell cell;
+        private final Drawable circleArrowDrawable;
         private final Paint nameBackgroundPaint;
         private final TextPaint nameTextPaint;
         private final RecyclerListView recyclerView;
-
-        private final Drawable shadowDrawable = ContextCompat.getDrawable(getContext(), R.drawable.reactions_bubble_shadow);
-        private final RectF bubbleRect = new RectF();
-        private final Paint bubblePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Path bubblePath = new Path();
-        private final Matrix bubbleGradientMatrix = new Matrix();
-
-        private final PointF startLeftRectPoint = new PointF();
-        private final PointF startRightRectPoint = new PointF();
-        private final PointF tanLeftInterRectPoint = new PointF();
-        private final PointF tanRightInterRectPoint = new PointF();
-        private float xLeftTangentStart = 0f;
-        private float yLeftTangentStart = 0f;
-        private float xRightTangentStart = 0f;
-        private float yRightTangentStart = 0f;
 
         @Nullable
         private Adapter adapter;
@@ -132,10 +125,13 @@ public abstract class ChatQuickReply {
         private int selectedChildViewPosition = -1;
         private int prevWidth = 0;
         private int prevHeight = 0;
+        private int prevDrawSideButton = 0;
+        private float circleRotationDegrees = 0;
 
-        public ReplyViewGroup(@NonNull BaseFragment fragment) {
+        public ReplyViewGroup(@NonNull ChatActivity fragment, @NonNull ChatMessageCell cell) {
             super(fragment.getContext());
             this.fragment = fragment;
+            this.cell = cell;
             setWillNotDraw(false);
             nameBackgroundPaint = getThemedPaint(Theme.key_paint_chatActionBackground);
             nameTextPaint = new TextPaint(getThemedPaint(Theme.key_paint_chatActionText));
@@ -219,6 +215,8 @@ public abstract class ChatQuickReply {
             recyclerView.setNestedScrollingEnabled(false);
             recyclerView.setOverScrollMode(View.OVER_SCROLL_NEVER);
             addView(recyclerView);
+
+            circleArrowDrawable = fragment.getThemedDrawable(Theme.key_drawable_shareIcon);
         }
 
         @Override
@@ -244,18 +242,23 @@ public abstract class ChatQuickReply {
             } else {
                 listTop = listToButtonHeight;
             }
-            recyclerView.layout(SHADOW_SPACE, listTop, SHADOW_SPACE + recyclerView.getMeasuredWidth(), listTop + recyclerView.getMeasuredHeight());
+            recyclerView.layout(SHADOW_SPACE, listTop, width - SHADOW_SPACE, listTop + recyclerView.getMeasuredHeight());
 
             if (prevWidth != width || prevHeight != height) {
                 int backgroundColor = fragment.getThemedColor(Theme.key_actionBarDefaultSubmenuBackground);
-                int sideButtonColor = ColorUtils.setAlphaComponent(fragment.getThemedPaint(Theme.key_paint_chatActionBackground).getColor(), 127);
+                int sideButtonColor = Theme.serviceBitmap.getPixel(
+                        Math.round((cell.getX() + cell.sideStartX) * (Theme.serviceBitmap.getWidth() * 1.0f / fragment.getChatListView().getWidth())),
+                        Math.round((cell.getY() + cell.sideStartY) * (Theme.serviceBitmap.getHeight() * 1.0f / fragment.getChatListView().getHeight()))
+                );
+                sideButtonColor = ColorUtils.compositeColors(fragment.getThemedColor(Theme.key_chat_serviceBackground), sideButtonColor);
+
                 bubbleGradientMatrix.setTranslate(0f, recyclerView.getTop() + AndroidUtilities.dp(1));
                 int gradientHeight = height - recyclerView.getTop() + AndroidUtilities.dp(1);
                 float backgroundPart = (float) recyclerView.getHeight() / gradientHeight;
                 LinearGradient gradient = new LinearGradient(
                         0f, 0f, 0f, gradientHeight,
                         new int[] { backgroundColor, backgroundColor, sideButtonColor, sideButtonColor },
-                        new float[] { 0.0f, backgroundPart, backgroundPart + (listToButtonHeight - ChatMessageCell.SIDE_BUTTON_SIZE * 1.0f) / height,  1.0f }, Shader.TileMode.CLAMP
+                        new float[] { 0.0f, backgroundPart, backgroundPart + (listToButtonHeight - ChatMessageCell.SIDE_BUTTON_SIZE * 1.0f) / height, 1.0f }, Shader.TileMode.CLAMP
                 );
                 bubblePaint.setShader(gradient);
                 prevWidth = width;
@@ -269,12 +272,15 @@ public abstract class ChatQuickReply {
             shadowDrawable.draw(canvas);
             shadowDrawable.setAlpha(bubblePaint.getAlpha());
             canvas.drawPath(bubblePath, bubblePaint);
-            super.dispatchDraw(canvas);
-        }
 
-        @Override
-        protected void onDraw(@NonNull Canvas canvas) {
-            super.onDraw(canvas);
+            BaseCell.setDrawableBounds(circleArrowDrawable, circleRect.left + AndroidUtilities.dp(4), circleRect.top + AndroidUtilities.dp(4));
+            canvas.save();
+            canvas.rotate(circleRotationDegrees, circleArrowDrawable.getBounds().centerX(), circleArrowDrawable.getBounds().centerY());
+            circleArrowDrawable.draw(canvas);
+            canvas.restore();
+
+            super.dispatchDraw(canvas);
+
             float topOffset = isListAboveReplyButton ? 0f : (listToButtonHeight - listToNameHeight);
             for (int i = 0; i < nameStateList.size(); ++i) {
                 StaticLayout staticLayout = nameStateList.get(i).staticLayout;
@@ -287,9 +293,10 @@ public abstract class ChatQuickReply {
                 float scale = 0.8f + 0.2f * nameStateList.get(i).currentProgress;
                 canvas.scale(scale, scale, textBackgroundRect.centerX(), textBackgroundRect.bottom + textBackgroundRect.height() * 0.5f);
 
+                fragment.getResourceProvider().applyServiceShaderMatrix(cell.getMeasuredWidth(), cell.getBackgroundHeight(), cell.getX(), cell.getViewTop());
                 float radius = textBackgroundRect.height() * 0.5f;
                 int savedBackgroundAlpha = nameBackgroundPaint.getAlpha();
-                nameBackgroundPaint.setAlpha(Math.round(savedBackgroundAlpha / 255f * alpha));
+                nameBackgroundPaint.setAlpha(Math.round(savedBackgroundAlpha / 255f * alpha * 0.75f));
                 canvas.drawRoundRect(textBackgroundRect, radius, radius, nameBackgroundPaint);
                 nameBackgroundPaint.setAlpha(savedBackgroundAlpha);
 
@@ -321,7 +328,7 @@ public abstract class ChatQuickReply {
                     Adapter.ViewHolder.IMAGE_LAYOUT_WIDTH * itemCount;
         }
 
-        public void openAnimation(@NonNull RectF srcRect) {
+        public void openAnimation(@NonNull RectF srcCircleRect) {
             if (getParent() != null) {
                 ViewGroup parentViewGroup = (ViewGroup) getParent();
                 prevClipChildren = parentViewGroup.getClipChildren();
@@ -362,29 +369,33 @@ public abstract class ChatQuickReply {
             final Path circlePath = new Path();
             final Path leftConnectionPath = new Path();
             final Path rightConnectionPath = new Path();
+            final PointF startLeftRectPoint = new PointF();
+            final PointF startRightRectPoint = new PointF();
+            final PointF tanLeftInterRectPoint = new PointF();
+            final PointF tanRightInterRectPoint = new PointF();
             final float circleRadius = ChatMessageCell.SIDE_BUTTON_SIZE * 0.5f;
             ValueAnimator bubbleAnimator = ValueAnimator.ofFloat(0f, 1f);
             bubbleAnimator.addUpdateListener(animation -> {
                 float progress = (float) animation.getAnimatedValue();
-                bubblePath.rewind();
                 circlePath.rewind();
                 leftConnectionPath.rewind();
                 rightConnectionPath.rewind();
 
                 // prepare rect
                 float sizeProgress = sizeInterpolator.getInterpolation(progress);
-                bubbleRect.top = AndroidUtilities.lerp(srcRect.top, recyclerView.getTop(), topInterpolator.getInterpolation(progress));
-                bubbleRect.left = AndroidUtilities.lerp(srcRect.left, recyclerView.getLeft(), sizeProgress);
-                bubbleRect.right = bubbleRect.left + AndroidUtilities.lerp(srcRect.width(), recyclerView.getWidth(), sizeProgress);
-                bubbleRect.bottom = bubbleRect.top + AndroidUtilities.lerp(srcRect.height(), recyclerView.getHeight(), sizeProgress);
+                bubbleRect.top = AndroidUtilities.lerp(srcCircleRect.top, recyclerView.getTop(), topInterpolator.getInterpolation(progress));
+                bubbleRect.left = AndroidUtilities.lerp(srcCircleRect.left, recyclerView.getLeft(), sizeProgress);
+                bubbleRect.right = bubbleRect.left + AndroidUtilities.lerp(srcCircleRect.width(), recyclerView.getWidth(), sizeProgress);
+                bubbleRect.bottom = bubbleRect.top + AndroidUtilities.lerp(srcCircleRect.height(), recyclerView.getHeight(), sizeProgress);
                 float bubbleRectRadius = bubbleRect.height() * 0.5f;
+                bubblePath.rewind();
                 bubblePath.addRoundRect(bubbleRect, bubbleRectRadius, bubbleRectRadius, Path.Direction.CW);
 
                 // prepare list
                 float recyclerViewScale = bubbleRect.width() / recyclerView.getMeasuredWidth();
                 recyclerView.setScaleX(recyclerViewScale);
                 recyclerView.setScaleY(recyclerViewScale);
-                recyclerView.setTranslationX(bubbleRect.left);
+                recyclerView.setTranslationX(bubbleRect.left - SHADOW_SPACE);
                 recyclerView.setTranslationY(bubbleRect.top - recyclerView.getTop() + (bubbleRect.height() - recyclerView.getHeight() * recyclerViewScale) / 2);
 
                 // prepare gradient
@@ -395,36 +406,35 @@ public abstract class ChatQuickReply {
                 }
 
                 // prepare side button
-                float circleVerticalOffset = -circleInterpolator.getInterpolation(progress) * circleRadius;
-                if (!isListAboveReplyButton) {
-                    circleVerticalOffset *= -1;
-                }
-                float yCircleCenter = srcRect.centerY() + circleVerticalOffset;
-                if (yCircleCenter + circleRadius > bubbleRect.bottom) {
-                    circlePath.addCircle(srcRect.centerX(), yCircleCenter, circleRadius, Path.Direction.CW);
+                float circleProgress = -circleInterpolator.getInterpolation(progress);
+                circleRotationDegrees = circleProgress * 45f;
+                circleRect.set(srcCircleRect);
+                circleRect.offset(0, circleProgress * circleRadius * (isListAboveReplyButton ? 1 : -1));
+                if (circleRect.bottom > bubbleRect.bottom) {
+                    circlePath.addCircle(srcCircleRect.centerX(), circleRect.centerY(), circleRadius, Path.Direction.CW);
                 }
 
-                float circleIntersectionHeight = yCircleCenter - bubbleRect.bottom;
-                if (bubbleRect.bottom < yCircleCenter + circleRadius) {
+                float circleIntersectionHeight = circleRect.centerY() - bubbleRect.bottom;
+                if (bubbleRect.bottom < circleRect.bottom) {
                     float additionalAngleRad = (float) Math.toRadians(AndroidUtilities.lerpAngle(10, 30, MathUtils.clamp(circleIntersectionHeight / circleRadius, 0f, 1f)));
-                    float circleIntersectionWidth = circleIntersectionHeight >= yCircleCenter
+                    float circleIntersectionWidth = circleIntersectionHeight >= circleRect.centerY()
                             ? 0
                             : (float) Math.sqrt(circleRadius * circleRadius - circleIntersectionHeight * circleIntersectionHeight);
                     double leftAngleRad = Math.abs(circleIntersectionHeight) >= circleRadius
                             ? Math.PI / 2
                             : Math.atan2(circleIntersectionHeight, -circleIntersectionWidth);
                     leftAngleRad += additionalAngleRad;
-                    xLeftTangentStart = srcRect.centerX() + (float) (circleRadius * cos(leftAngleRad));
-                    yLeftTangentStart = yCircleCenter - (float) (circleRadius * sin(leftAngleRad));
-                    float kLeft = -1 / ((yCircleCenter - yLeftTangentStart) / (xLeftTangentStart - srcRect.centerX()));
+                    float xLeftTangentStart = srcCircleRect.centerX() + (float) (circleRadius * cos(leftAngleRad));
+                    float yLeftTangentStart = circleRect.centerY() - (float) (circleRadius * sin(leftAngleRad));
+                    float kLeft = -1 / ((circleRect.centerY() - yLeftTangentStart) / (xLeftTangentStart - srcCircleRect.centerX()));
 
                     double rightAngleRad = Math.abs(circleIntersectionHeight) >= circleRadius
                             ? Math.PI / 2
                             : Math.atan2(circleIntersectionHeight, circleIntersectionWidth);
                     rightAngleRad -= additionalAngleRad;
-                    xRightTangentStart = srcRect.centerX() + (float) (circleRadius * cos(rightAngleRad));
-                    yRightTangentStart = yCircleCenter - (float) (circleRadius * sin(rightAngleRad));
-                    float kRight = -1 / ((yCircleCenter - yRightTangentStart) / (xRightTangentStart - srcRect.centerX()));
+                    float xRightTangentStart = srcCircleRect.centerX() + (float) (circleRadius * cos(rightAngleRad));
+                    float yRightTangentStart = circleRect.centerY() - (float) (circleRadius * sin(rightAngleRad));
+                    float kRight = -1 / ((circleRect.centerY() - yRightTangentStart) / (xRightTangentStart - srcCircleRect.centerX()));
 
                     if (AndroidUtilities.fillLinesIntersection(kLeft, 0, 0, yLeftTangentStart - bubbleRect.bottom, tanLeftInterRectPoint) &&
                             AndroidUtilities.fillLinesIntersection(kRight, 0, 0, yRightTangentStart - bubbleRect.bottom, tanRightInterRectPoint) &&
@@ -443,8 +453,8 @@ public abstract class ChatQuickReply {
 
                         leftConnectionPath.moveTo(startLeftRectPoint.x, startLeftRectPoint.y);
                         leftConnectionPath.lineTo(xLeftTangentStart, yLeftTangentStart);
-                        leftConnectionPath.lineTo(srcRect.centerX(), yLeftTangentStart);
-                        leftConnectionPath.lineTo(srcRect.centerX(), tanLeftInterRectPoint.y);
+                        leftConnectionPath.lineTo(srcCircleRect.centerX(), yLeftTangentStart);
+                        leftConnectionPath.lineTo(srcCircleRect.centerX(), tanLeftInterRectPoint.y);
                         leftConnectionPath.close();
                         leftConnectionPath.moveTo(startLeftRectPoint.x, startLeftRectPoint.y);
                         leftConnectionPath.quadTo(tanLeftInterRectPoint.x, tanLeftInterRectPoint.y, xLeftTangentStart, yLeftTangentStart);
@@ -462,8 +472,8 @@ public abstract class ChatQuickReply {
                         }
                         rightConnectionPath.moveTo(startRightRectPoint.x, startRightRectPoint.y);
                         rightConnectionPath.lineTo(xRightTangentStart, yRightTangentStart);
-                        rightConnectionPath.lineTo(srcRect.centerX(), yRightTangentStart);
-                        rightConnectionPath.lineTo(srcRect.centerX(), tanRightInterRectPoint.y);
+                        rightConnectionPath.lineTo(srcCircleRect.centerX(), yRightTangentStart);
+                        rightConnectionPath.lineTo(srcCircleRect.centerX(), tanRightInterRectPoint.y);
                         rightConnectionPath.close();
                         rightConnectionPath.moveTo(startRightRectPoint.x, startRightRectPoint.y);
                         rightConnectionPath.quadTo(tanRightInterRectPoint.x, tanRightInterRectPoint.y, xRightTangentStart, yRightTangentStart);
@@ -483,6 +493,7 @@ public abstract class ChatQuickReply {
                 public void onAnimationStart(Animator animation) {
                     super.onAnimationStart(animation);
                     setVisibility(VISIBLE);
+                    setCellSideButtonVisible(false);
                 }
             });
             bubbleAnimator.setDuration(750);
@@ -515,12 +526,29 @@ public abstract class ChatQuickReply {
             openAnimator.start();
         }
 
+        private void setCellSideButtonVisible(boolean isVisible) {
+            if (isVisible) {
+                cell.drawSideButton = prevDrawSideButton;
+            } else {
+                prevDrawSideButton = cell.drawSideButton;
+                cell.drawSideButton = 0;
+            }
+            fragment.getChatListView().invalidate();
+        }
+
         private void animateClose() {
             if (openAnimator != null) {
                 openAnimator.cancel();
             }
             animate().alpha(0.0f).scaleX(0.8f).scaleY(0.8f).setDuration(125)
                     .setListener(new AnimatorListenerAdapter() {
+
+                        @Override
+                        public void onAnimationStart(Animator animation) {
+                            super.onAnimationStart(animation);
+                            setCellSideButtonVisible(true);
+                        }
+
                         @Override
                         public void onAnimationEnd(Animator animation) {
                             super.onAnimationEnd(animation);
