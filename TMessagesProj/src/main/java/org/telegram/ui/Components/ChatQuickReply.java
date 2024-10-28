@@ -35,6 +35,8 @@ import java.util.*;
 
 public abstract class ChatQuickReply {
 
+    private static final int DEFAULT_ITEM_COUNT = 5;
+
     /**
      * TODO NotificationCenter.dialogsNeedReload
      * TODO check after first install, (item count could be less than 5)
@@ -43,13 +45,14 @@ public abstract class ChatQuickReply {
     public static ReplyViewGroup show(@NonNull ChatActivity chatActivity, @NonNull ChatMessageCell cell, @NonNull Delegate delegate) {
         int rootHorizontalSpace = AndroidUtilities.dp(3);
 
+        Adapter adapter = new Adapter();
         ReplyViewGroup rootLayout = new ReplyViewGroup(chatActivity, cell);
-        rootLayout.setAdapter(new Adapter());
+        rootLayout.setAdapter(adapter);
         rootLayout.setDelegate(delegate);
         rootLayout.setClipChildren(false);
         rootLayout.setClipToPadding(false);
 
-        int itemCount = 5 + 1;
+        int itemCount = Math.min(DEFAULT_ITEM_COUNT, adapter.getItemCount()) + 1;
         int windowWidth;
         do {
             --itemCount;
@@ -64,6 +67,8 @@ public abstract class ChatQuickReply {
         int x = Math.round(cellLocation[0] + cell.sideStartX + ChatMessageCell.SIDE_BUTTON_SIZE * 0.5f - windowWidth * 0.5f);
         if (x + rootHorizontalSpace * 2 + windowWidth > anchorView.getWidth()) {
             x = anchorView.getWidth() - rootHorizontalSpace - windowWidth;
+        } else if (x < rootHorizontalSpace) {
+            x = rootHorizontalSpace;
         }
         int y = Math.round(cellLocation[1] + cell.sideStartY + ChatMessageCell.SIDE_BUTTON_SIZE - rootLayout.getMeasuredHeight());
         if (y <= chatActivity.getActionBar().getHeight() + AndroidUtilities.dp(9)) {
@@ -127,6 +132,7 @@ public abstract class ChatQuickReply {
         private int prevHeight = 0;
         private int prevDrawSideButton = 0;
         private float circleRotationDegrees = 0;
+        private boolean isOpenAnimationFinished = false;
 
         public ReplyViewGroup(@NonNull ChatActivity fragment, @NonNull ChatMessageCell cell) {
             super(fragment.getContext());
@@ -171,8 +177,12 @@ public abstract class ChatQuickReply {
                     fillPaint.setColor(fragment.getThemedColor(Theme.key_actionBarDefaultSubmenuBackground));
                 }
 
+                @SuppressLint("ClickableViewAccessibility")
                 @Override
                 public boolean onTouchEvent(MotionEvent e) {
+                    if (!isOpenAnimationFinished) {
+                        return true;
+                    }
                     boolean isGestureDetectorHandled = gestureDetector.onTouchEvent(e);
                     if (e.getAction() == MotionEvent.ACTION_MOVE) {
                         if (isLongTapped) {
@@ -252,7 +262,6 @@ public abstract class ChatQuickReply {
                 );
                 sideButtonColor = ColorUtils.compositeColors(fragment.getThemedColor(Theme.key_chat_serviceBackground), sideButtonColor);
 
-                bubbleGradientMatrix.setTranslate(0f, recyclerView.getTop() + AndroidUtilities.dp(1));
                 int gradientHeight = height - recyclerView.getTop() + AndroidUtilities.dp(1);
                 float backgroundPart = (float) recyclerView.getHeight() / gradientHeight;
                 LinearGradient gradient = new LinearGradient(
@@ -269,8 +278,9 @@ public abstract class ChatQuickReply {
         @Override
         protected void dispatchDraw(@NonNull Canvas canvas) {
             shadowDrawable.setBounds((int) bubbleRect.left - SHADOW_SPACE, (int) bubbleRect.top - SHADOW_SPACE, (int) bubbleRect.right + SHADOW_SPACE, (int) bubbleRect.bottom + SHADOW_SPACE);
-            shadowDrawable.draw(canvas);
             shadowDrawable.setAlpha(bubblePaint.getAlpha());
+            shadowDrawable.draw(canvas);
+
             canvas.drawPath(bubblePath, bubblePaint);
 
             BaseCell.setDrawableBounds(circleArrowDrawable, circleRect.left + AndroidUtilities.dp(4), circleRect.top + AndroidUtilities.dp(4));
@@ -369,6 +379,7 @@ public abstract class ChatQuickReply {
             final Path circlePath = new Path();
             final Path leftConnectionPath = new Path();
             final Path rightConnectionPath = new Path();
+            final Path intersectionPath = new Path();
             final PointF startLeftRectPoint = new PointF();
             final PointF startRightRectPoint = new PointF();
             final PointF tanLeftInterRectPoint = new PointF();
@@ -380,6 +391,8 @@ public abstract class ChatQuickReply {
                 circlePath.rewind();
                 leftConnectionPath.rewind();
                 rightConnectionPath.rewind();
+                intersectionPath.rewind();
+                bubblePaint.setAlpha(Math.round(255 * MathUtils.clamp(progress * 10f, 0.0f, 1.0f)));
 
                 // prepare rect
                 float sizeProgress = sizeInterpolator.getInterpolation(progress);
@@ -399,7 +412,7 @@ public abstract class ChatQuickReply {
                 recyclerView.setTranslationY(bubbleRect.top - recyclerView.getTop() + (bubbleRect.height() - recyclerView.getHeight() * recyclerViewScale) / 2);
 
                 // prepare gradient
-                bubbleGradientMatrix.setTranslate(0f, bubbleRect.top + AndroidUtilities.dp(1));
+                bubbleGradientMatrix.setTranslate(0f,  bubbleRect.height() - recyclerView.getHeight() + bubbleRect.top + AndroidUtilities.dp(1));
                 Shader shader = bubblePaint.getShader();
                 if (shader != null) {
                     shader.setLocalMatrix(bubbleGradientMatrix);
@@ -407,7 +420,7 @@ public abstract class ChatQuickReply {
 
                 // prepare side button
                 float circleProgress = -circleInterpolator.getInterpolation(progress);
-                circleRotationDegrees = circleProgress * 45f;
+                circleRotationDegrees = circleProgress * 45f * (isListAboveReplyButton ? 1f : -1f);
                 circleRect.set(srcCircleRect);
                 circleRect.offset(0, circleProgress * circleRadius * (isListAboveReplyButton ? 1 : -1));
                 if (circleRect.bottom > bubbleRect.bottom) {
@@ -440,6 +453,7 @@ public abstract class ChatQuickReply {
                             AndroidUtilities.fillLinesIntersection(kRight, 0, 0, yRightTangentStart - bubbleRect.bottom, tanRightInterRectPoint) &&
                             tanLeftInterRectPoint.x + xLeftTangentStart - (tanRightInterRectPoint.x + xRightTangentStart) <= AndroidUtilities.dp(10)
                     ) {
+                        // prepare left path
                         tanLeftInterRectPoint.x += xLeftTangentStart;
                         tanLeftInterRectPoint.y = yLeftTangentStart - tanLeftInterRectPoint.y;
                         float tanLeftLineSize = (float) Math.sqrt(Math.pow(tanLeftInterRectPoint.x - xLeftTangentStart, 2.0f) + Math.pow(tanLeftInterRectPoint.y - yLeftTangentStart, 2.0f));
@@ -450,7 +464,6 @@ public abstract class ChatQuickReply {
                             float yDist = (float) Math.sqrt(bubbleRectRadius * bubbleRectRadius - xDist * xDist);
                             startLeftRectPoint.y = bubbleRect.centerY() + (Float.isNaN(yDist) ? 0 : yDist);
                         }
-
                         leftConnectionPath.moveTo(startLeftRectPoint.x, startLeftRectPoint.y);
                         leftConnectionPath.lineTo(xLeftTangentStart, yLeftTangentStart);
                         leftConnectionPath.lineTo(srcCircleRect.centerX(), yLeftTangentStart);
@@ -460,10 +473,11 @@ public abstract class ChatQuickReply {
                         leftConnectionPath.quadTo(tanLeftInterRectPoint.x, tanLeftInterRectPoint.y, xLeftTangentStart, yLeftTangentStart);
                         leftConnectionPath.close();
 
+                        // prepare right path
                         tanRightInterRectPoint.x += xRightTangentStart;
                         tanRightInterRectPoint.y = yRightTangentStart - tanRightInterRectPoint.y;
-                        float rightTangentLineSize = (float) Math.sqrt(Math.pow(tanRightInterRectPoint.x - xRightTangentStart, 2.0f) + Math.pow(tanRightInterRectPoint.y - yRightTangentStart, 2.0f));
-                        startRightRectPoint.x = Math.min(bubbleRect.right, tanRightInterRectPoint.x + rightTangentLineSize);
+                        float tanRightLineSize = (float) Math.sqrt(Math.pow(tanRightInterRectPoint.x - xRightTangentStart, 2.0f) + Math.pow(tanRightInterRectPoint.y - yRightTangentStart, 2.0f));
+                        startRightRectPoint.x = Math.min(bubbleRect.right, tanRightInterRectPoint.x + tanRightLineSize);
                         startRightRectPoint.y = tanRightInterRectPoint.y;
                         if (startRightRectPoint.x > bubbleRect.right - bubbleRectRadius) {
                             float xDist = startRightRectPoint.x - (bubbleRect.right - bubbleRectRadius);
@@ -478,11 +492,18 @@ public abstract class ChatQuickReply {
                         rightConnectionPath.moveTo(startRightRectPoint.x, startRightRectPoint.y);
                         rightConnectionPath.quadTo(tanRightInterRectPoint.x, tanRightInterRectPoint.y, xRightTangentStart, yRightTangentStart);
                         rightConnectionPath.close();
+
+                        // fill intersection
+                        intersectionPath.moveTo(startLeftRectPoint.x, startLeftRectPoint.y);
+                        intersectionPath.lineTo(srcCircleRect.centerX(), Math.max(tanLeftInterRectPoint.y, tanRightInterRectPoint.y));
+                        intersectionPath.lineTo(startRightRectPoint.x, startRightRectPoint.y);
+                        intersectionPath.lineTo(startLeftRectPoint.x, startLeftRectPoint.y);
                     }
                 }
 
                 bubblePath.op(leftConnectionPath, Path.Op.UNION);
                 bubblePath.op(rightConnectionPath, Path.Op.UNION);
+                bubblePath.op(intersectionPath, Path.Op.UNION);
                 bubblePath.op(circlePath, Path.Op.UNION);
                 bubblePath.close();
 
@@ -494,6 +515,11 @@ public abstract class ChatQuickReply {
                     super.onAnimationStart(animation);
                     setVisibility(VISIBLE);
                     setCellSideButtonVisible(false);
+                }
+                @Override
+                public void onAnimationEnd(Animator animation) {
+                    super.onAnimationEnd(animation);
+                    isOpenAnimationFinished = true;
                 }
             });
             bubbleAnimator.setDuration(750);
@@ -563,27 +589,6 @@ public abstract class ChatQuickReply {
                         }
                     })
                     .start();
-        }
-
-        private Interpolator getBezierCosInterpolator(
-                float cbStartX, float cbStartY, float cbEndX, float cbEndY, float bezierMaxInput, float bezierFactor,
-                float cosA, float cosB, float cosC, float cosD
-        ) {
-            return new Interpolator() {
-
-                private final CubicBezierInterpolator bezier = new CubicBezierInterpolator(cbStartX, cbStartY, cbEndX, cbEndY);
-
-                @Override
-                public float getInterpolation(float input) {
-                    if (input < 0.0f) {
-                        return 0.0f;
-                    } else if (input <= bezierMaxInput) {
-                        return (1f - bezierFactor) + bezier.getInterpolation(input / bezierMaxInput) * bezierFactor;
-                    } else {
-                        return Math.min(1.0f, (float) (cos(input * 2 * Math.PI / cosA + cosB) * cosC + cosD));
-                    }
-                }
-            };
         }
 
         private void onListChildSelected(int position) {
@@ -696,7 +701,7 @@ public abstract class ChatQuickReply {
 
         private void shareToDialog(View view) {
             int position = recyclerView.getChildAdapterPosition(view);
-            final TLRPC.Dialog dialog = adapter.getItemAt(position);
+            final TLRPC.Dialog dialog = adapter != null ? adapter.getItemAt(position) : null;
             if (dialog == null) {
                 return;
             }
@@ -948,6 +953,7 @@ public abstract class ChatQuickReply {
             return dialogs.get(position);
         }
 
+        @SuppressLint("NotifyDataSetChanged")
         public void fetchDialogs() {
             int currentAccount = UserConfig.selectedAccount;
             long selfUserId = UserConfig.getInstance(currentAccount).clientUserId;
@@ -986,6 +992,10 @@ public abstract class ChatQuickReply {
             }
             dialogs.addAll(allDialogs);
             dialogs.addAll(archivedDialogs);
+            for (int i = dialogs.size() - 1; i >= DEFAULT_ITEM_COUNT; --i) {
+                dialogs.remove(i);
+            }
+
             notifyDataSetChanged();
         }
 

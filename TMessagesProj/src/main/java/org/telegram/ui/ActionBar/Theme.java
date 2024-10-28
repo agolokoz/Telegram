@@ -3083,7 +3083,7 @@ public class Theme {
     private static BackgroundGradientDrawable.Disposable backgroundGradientDisposable;
     private static boolean isCustomTheme;
     private static int serviceMessageColor;
-    private static Bitmap serviceBitmap;
+    public static Bitmap serviceBitmap;
     public static BitmapShader serviceBitmapShader;
     private static Matrix serviceBitmapMatrix;
     private static int serviceSelectedMessageColor;

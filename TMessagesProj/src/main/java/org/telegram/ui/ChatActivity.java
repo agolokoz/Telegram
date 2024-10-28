@@ -35373,7 +35373,7 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
             chatListViewTouchInterceptor = (v, event) -> {
                 viewGroup.getLocationOnScreen(viewGroupLocation);
                 MotionEvent newEvent = MotionEvent.obtain(event);
-                newEvent.offsetLocation(-viewGroupLocation[0], -viewGroupLocation[1]);
+                newEvent.offsetLocation(-viewGroupLocation[0] + chatListView.getLeft(), -viewGroupLocation[1] + chatListView.getTop());
                 viewGroup.passTouchEvent(newEvent);
                 return true;
             };
